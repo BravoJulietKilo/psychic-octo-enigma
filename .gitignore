@@ -1,0 +1,49 @@
+# Unreal Engine build artifacts (never commit)
+
+Binaries/
+DerivedDataCache/
+Intermediate/
+Saved/
+
+# Compiled shaders (auto-generated)
+
+*.ushadercache
+*.usmap
+
+# Project files Rider/VS can regenerate
+
+*.sln
+*.vcxproj
+*.vcxproj.filters
+*.vcxproj.user
+
+# JetBrains Rider project settings
+
+.idea/
+*.iml
+
+# Visual Studio noise (if Rider isn’t the only IDE)
+
+.vs/
+
+# Operating system noise
+
+.DS_Store
+Thumbs.db
+
+# Crash reports and logs
+
+*.log
+*.dmp
+
+# Temporary build outputs
+
+*.obj
+*.pdb
+*.tlog
+*.tmp
+
+# RiderLink plugin build outputs inside the project
+
+Plugins/Developer/RiderLink//Intermediate/
+Plugins/Developer/RiderLink//Binaries/
