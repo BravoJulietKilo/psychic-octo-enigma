@@ -12,15 +12,14 @@ class UPraxisRandomService;
 class UPraxisMetricsSubsystem;
 class UStateTree;
 class UStateTreeComponent;
+class UMachineContextComponent;
 
 /**
  * UMachineLogicComponent
  * 
  * Owns and drives a StateTree that controls machine behavior.
+ * Creates a MachineContextComponent that StateTree tasks can bind to for state access.
  * Ticks the StateTree in response to simulation ticks from Orchestrator.
- * 
- * NOTE: StateTree context/binding integration is TODO - currently just manages
- * the StateTree component lifecycle and basic work order tracking.
  */
 UCLASS(ClassGroup=(Praxis), meta=(BlueprintSpawnableComponent))
 class PRAXISSIMULATIONKERNEL_API UMachineLogicComponent : public UActorComponent
@@ -49,6 +48,10 @@ public:
 	/** Get the StateTree component (for advanced access) */
 	UFUNCTION(BlueprintPure, Category = "Machine")
 	UStateTreeComponent* GetStateTreeComponent() const { return StateTreeComponent; }
+	
+	/** Get the machine context component */
+	UFUNCTION(BlueprintPure, Category = "Machine")
+	UMachineContextComponent* GetMachineContextComponent() const { return MachineContextComponent; }
 
 protected:
 	// ═══════════════════════════════════════════════════════════════════════════
@@ -68,6 +71,13 @@ protected:
 
 	UFUNCTION()
 	void HandleEndSession();
+
+	// ═══════════════════════════════════════════════════════════════════════════
+	// Initialization
+	// ═══════════════════════════════════════════════════════════════════════════
+	
+	/** Initialize the machine context with configuration values */
+	void InitializeMachineContext();
 
 public:
 	// ═══════════════════════════════════════════════════════════════════════════
@@ -107,7 +117,7 @@ public:
 	float SlowSpeedFactor = 0.5f;
 
 	// ═══════════════════════════════════════════════════════════════════════════
-	// Runtime State (Read-Only in Editor)
+	// Runtime State (Read-Only in Editor) - Mirrored from Context for debugging
 	// ═══════════════════════════════════════════════════════════════════════════
 	
 	/** Current work order SKU */
@@ -141,10 +151,14 @@ private:
 	TObjectPtr<UPraxisMetricsSubsystem> Metrics = nullptr;
 
 	// ═══════════════════════════════════════════════════════════════════════════
-	// StateTree Runtime
+	// Components
 	// ═══════════════════════════════════════════════════════════════════════════
 	
 	/** StateTree component (created programmatically) */
 	UPROPERTY()
 	TObjectPtr<UStateTreeComponent> StateTreeComponent = nullptr;
+	
+	/** Machine context component (created programmatically) - provides state to StateTree */
+	UPROPERTY()
+	TObjectPtr<UMachineContextComponent> MachineContextComponent = nullptr;
 };

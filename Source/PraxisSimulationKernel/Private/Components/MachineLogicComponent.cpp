@@ -1,6 +1,7 @@
 // Copyright 2025 Celsian Pty Ltd
 
 #include "Components/MachineLogicComponent.h"
+#include "Components/MachineContextComponent.h"
 #include "PraxisSimulationKernel.h"
 #include "PraxisOrchestrator.h"
 #include "PraxisRandomService.h"
@@ -30,6 +31,25 @@ void UMachineLogicComponent::OnRegister()
 	if (!GetOwner())
 	{
 		return;
+	}
+	
+	// Create MachineContext component first (StateTree tasks will bind to this)
+	if (!MachineContextComponent)
+	{
+		MachineContextComponent = NewObject<UMachineContextComponent>(
+			GetOwner(), 
+			UMachineContextComponent::StaticClass(), 
+			TEXT("MachineContext")
+		);
+		
+		if (MachineContextComponent)
+		{
+			MachineContextComponent->RegisterComponent();
+			
+			UE_LOG(LogPraxisSim, Verbose, 
+				TEXT("[%s] MachineContext component created"), 
+				*MachineId.ToString());
+		}
 	}
 	
 	// Create StateTree component
@@ -89,6 +109,9 @@ void UMachineLogicComponent::BeginPlay()
 	// Subscribe to orchestrator events
 	Orchestrator->OnSimTick.AddDynamic(this, &UMachineLogicComponent::HandleSimTick);
 	Orchestrator->OnEndSession.AddDynamic(this, &UMachineLogicComponent::HandleEndSession);
+
+	// Initialize machine context
+	InitializeMachineContext();
 	
 	// Start the StateTree
 	if (StateTreeComponent && StateTreeComponent->IsRegistered())
@@ -126,6 +149,36 @@ void UMachineLogicComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 }
 
 // ════════════════════════════════════════════════════════════════════════════════
+// Initialization
+// ════════════════════════════════════════════════════════════════════════════════
+
+void UMachineLogicComponent::InitializeMachineContext()
+{
+	if (!MachineContextComponent)
+	{
+		UE_LOG(LogPraxisSim, Error, 
+			TEXT("[%s] Cannot initialize context - MachineContextComponent is null!"), 
+			*MachineId.ToString());
+		return;
+	}
+	
+	// Initialize the context component with our configuration
+	MachineContextComponent->InitializeContext(
+		MachineId,
+		ProductionRate,
+		ChangeoverDuration,
+		ScrapRate,
+		JamProbabilityPerTick,
+		MeanJamDuration,
+		SlowSpeedFactor
+	);
+	
+	UE_LOG(LogPraxisSim, Verbose, 
+		TEXT("[%s] Machine context initialized"), 
+		*MachineId.ToString());
+}
+
+// ════════════════════════════════════════════════════════════════════════════════
 // Orchestrator Callbacks
 // ════════════════════════════════════════════════════════════════════════════════
 
@@ -140,6 +193,16 @@ void UMachineLogicComponent::HandleSimTick(double SimDeltaSeconds, int32 TickCou
 			nullptr
 		);
 	}
+
+	// Update runtime display properties from context component
+	if (MachineContextComponent)
+	{
+		const auto& Context = MachineContextComponent->GetContext();
+		OutputCounter = Context.OutputCounter;
+		ScrapCounter = Context.ScrapCounter;
+		CurrentSKU = Context.CurrentSKU;
+		CurrentQuantity = Context.TargetQuantity;
+	}
 }
 
 void UMachineLogicComponent::HandleEndSession()
@@ -150,11 +213,16 @@ void UMachineLogicComponent::HandleEndSession()
 		Metrics->FlushMetrics();
 	}
 	
-	UE_LOG(LogPraxisSim, Log, 
-		TEXT("[%s] Session ended - Final stats: %d good, %d scrap"), 
-		*MachineId.ToString(),
-		OutputCounter,
-		ScrapCounter);
+	if (MachineContextComponent)
+	{
+		const auto& Context = MachineContextComponent->GetContext();
+		
+		UE_LOG(LogPraxisSim, Log, 
+			TEXT("[%s] Session ended - Final stats: %d good, %d scrap"), 
+			*MachineId.ToString(),
+			Context.OutputCounter,
+			Context.ScrapCounter);
+	}
 }
 
 // ════════════════════════════════════════════════════════════════════════════════
@@ -163,13 +231,24 @@ void UMachineLogicComponent::HandleEndSession()
 
 void UMachineLogicComponent::AssignWorkOrder(const FString& SKU, int32 Quantity)
 {
-	// Store work order info
-	CurrentSKU = SKU;
-	CurrentQuantity = Quantity;
+	if (!MachineContextComponent)
+	{
+		UE_LOG(LogPraxisSim, Error, 
+			TEXT("[%s] Cannot assign work order - MachineContextComponent is null!"), 
+			*MachineId.ToString());
+		return;
+	}
+	
+	// Update machine context
+	auto& Context = MachineContextComponent->GetMutableContext();
+	Context.CurrentSKU = SKU;
+	Context.TargetQuantity = Quantity;
+	Context.bHasActiveWorkOrder = true;
 	
 	// Reset counters for new work order
-	OutputCounter = 0;
-	ScrapCounter = 0;
+	Context.OutputCounter = 0;
+	Context.ScrapCounter = 0;
+	Context.ProductionAccumulator = 0.0f;
 	
 	UE_LOG(LogPraxisSim, Log, 
 		TEXT("[%s] Work order assigned: %s (Qty: %d)"), 
@@ -186,7 +265,8 @@ void UMachineLogicComponent::AssignWorkOrder(const FString& SKU, int32 Quantity)
 			Orchestrator->GetSimDateTimeUTC());
 	}
 	
-	// TODO: When we add StateTree context, send an event to trigger state change
+	// TODO: Optionally send StateTree event to trigger immediate transition
+	// StateTreeComponent->SendEvent(...);
 }
 
 FString UMachineLogicComponent::GetCurrentStateName() const
@@ -202,5 +282,10 @@ FString UMachineLogicComponent::GetCurrentStateName() const
 
 bool UMachineLogicComponent::IsProcessing() const
 {
-	return !CurrentSKU.IsEmpty() && CurrentQuantity > 0;
+	if (MachineContextComponent)
+	{
+		return MachineContextComponent->GetContext().bHasActiveWorkOrder;
+	}
+	
+	return false;
 }
