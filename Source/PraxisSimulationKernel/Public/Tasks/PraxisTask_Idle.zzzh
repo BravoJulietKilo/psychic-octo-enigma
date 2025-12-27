@@ -1,0 +1,45 @@
+// Copyright 2025 Celsian Pty Ltd
+
+#pragma once
+
+#include "CoreMinimal.h"
+#include "Tasks/PraxisMachineTaskBase.h"
+//#include "PraxisMachineContext.h"
+#include "StateTreeLinker.h"  // ADD THIS - defines FStateTreeLinker
+#include "PraxisTask_Idle.generated.h"
+
+/**
+ * FPraxisTask_Idle
+ * 
+ * Machine is idle, waiting for work order assignment.
+ * Succeeds when a work order is assigned (bHasActiveWorkOrder = true).
+ */
+USTRUCT()
+struct PRAXISSIMULATIONKERNEL_API FPraxisTask_Idle : public FPraxisMachineTaskBase
+{
+	GENERATED_BODY()
+	
+	using FInstanceDataType = FPraxisMachineTaskInstanceData;
+
+	// Declare external data requirement (the machine context)
+	virtual bool Link(FStateTreeLinker& Linker) override
+	{
+		Linker.LinkExternalData(MachineContextHandle);
+		return true;
+	}
+
+protected:
+	virtual EStateTreeRunStatus EnterState(
+		FStateTreeExecutionContext& Context, 
+		const FStateTreeTransitionResult& Transition
+	) const override;
+	
+	virtual EStateTreeRunStatus Tick(
+		FStateTreeExecutionContext& Context, 
+		const float DeltaTime
+	) const override;
+
+private:
+	// Handle to access machine context from external data
+	TStateTreeExternalDataHandle<FPraxisMachineContext> MachineContextHandle;
+};

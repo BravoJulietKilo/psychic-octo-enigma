@@ -1,0 +1,53 @@
+// Copyright 2025 Celsian Pty Ltd
+
+#include "Tasks/PraxisTask_DoChangeover.h"
+#include "PraxisSimulationKernel.h"
+#include "StateTreeExecutionContext.h"
+
+EStateTreeRunStatus FPraxisTask_DoChangeover::EnterState(
+	FStateTreeExecutionContext& Context, 
+	const FStateTreeTransitionResult& Transition) const
+{
+	Super::EnterState(Context, Transition);
+	
+	const FPraxisMachineTaskInstanceData& InstanceData = Context.GetInstanceData(*this);
+	FPraxisMachineContext& MachineCtx = Context.GetExternalData(MachineContextHandle);
+	
+	// Initialize changeover countdown
+	MachineCtx.ChangeoverTimeRemaining = MachineCtx.ChangeoverDuration;
+	MachineCtx.TimeInState = 0.0f;
+	
+	UE_LOG(LogPraxisSim, Log, 
+		TEXT("[%s] Entered Changeover state - Duration: %.1f seconds"), 
+		*MachineCtx.MachineId.ToString(), 
+		MachineCtx.ChangeoverDuration);
+	
+	return EStateTreeRunStatus::Running;
+}
+
+EStateTreeRunStatus FPraxisTask_DoChangeover::Tick(
+	FStateTreeExecutionContext& Context, 
+	const float DeltaTime) const
+{
+	const FPraxisMachineTaskInstanceData& InstanceData = Context.GetInstanceData(*this);
+	FPraxisMachineContext& MachineCtx = Context.GetExternalData(MachineContextHandle);
+	
+	// Update time tracking
+	MachineCtx.TimeInState += DeltaTime;
+	MachineCtx.ChangeoverTimeRemaining -= DeltaTime;
+	
+	// Check if changeover is complete
+	if (MachineCtx.ChangeoverTimeRemaining <= 0.0f)
+	{
+		MachineCtx.ChangeoverTimeRemaining = 0.0f;
+		
+		UE_LOG(LogPraxisSim, Log, 
+			TEXT("[%s] Changeover complete - transitioning to Processing"), 
+			*MachineCtx.MachineId.ToString());
+		
+		return EStateTreeRunStatus::Succeeded;  // Transition to Processing
+	}
+	
+	// Still changing over
+	return EStateTreeRunStatus::Running;
+}

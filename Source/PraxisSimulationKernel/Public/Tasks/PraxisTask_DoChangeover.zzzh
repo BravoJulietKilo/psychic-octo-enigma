@@ -1,0 +1,43 @@
+// Copyright 2025 Celsian Pty Ltd
+
+#pragma once
+
+#include "CoreMinimal.h"
+#include "Tasks/PraxisMachineTaskBase.h"
+//#include "PraxisMachineContext.h"
+#include "StateTreeLinker.h"
+#include "PraxisTask_DoChangeover.generated.h"
+
+/**
+ * FPraxisTask_DoChangeover
+ * 
+ * Handles machine changeover/setup time.
+ * Counts down ChangeoverTimeRemaining and succeeds when complete.
+ */
+USTRUCT()
+struct PRAXISSIMULATIONKERNEL_API FPraxisTask_DoChangeover : public FPraxisMachineTaskBase
+{
+	GENERATED_BODY()
+	
+	using FInstanceDataType = FPraxisMachineTaskInstanceData;
+
+	virtual bool Link(FStateTreeLinker& Linker) override
+	{
+		Linker.LinkExternalData(MachineContextHandle);
+		return true;
+	}
+
+protected:
+	virtual EStateTreeRunStatus EnterState(
+		FStateTreeExecutionContext& Context, 
+		const FStateTreeTransitionResult& Transition
+	) const override;
+	
+	virtual EStateTreeRunStatus Tick(
+		FStateTreeExecutionContext& Context, 
+		const float DeltaTime
+	) const override;
+
+private:
+	TStateTreeExternalDataHandle<FPraxisMachineContext> MachineContextHandle;
+};

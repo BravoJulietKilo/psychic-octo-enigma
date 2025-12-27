@@ -1,0 +1,89 @@
+// Copyright 2025 Celsian Pty Ltd
+
+#include "StateTrees/Tasks/STTask_Changeover.h"
+#include "Components/MachineContextComponent.h"
+#include "PraxisSimulationKernel.h"
+#include "StateTreeExecutionContext.h"
+
+// ════════════════════════════════════════════════════════════════════════════════
+// Task Lifecycle
+// ════════════════════════════════════════════════════════════════════════════════
+
+EStateTreeRunStatus FSTTask_Changeover::EnterState(
+	FStateTreeExecutionContext& Context,
+	const FStateTreeTransitionResult& Transition
+) const
+{
+	FInstanceDataType& InstanceData = Context.GetInstanceData(*this);
+	
+	if (!InstanceData.MachineContext)
+	{
+		UE_LOG(LogPraxisSim, Error, TEXT("STTask_Changeover: MachineContext is null!"));
+		return EStateTreeRunStatus::Failed;
+	}
+	
+	auto& MachineContext = InstanceData.MachineContext->GetMutableContext();
+	
+	// Reset time in state
+	MachineContext.TimeInState = 0.0f;
+	
+	UE_LOG(LogPraxisSim, Log, 
+		TEXT("[%s] Changeover started - Duration: %.1f seconds for SKU: %s"),
+		*MachineContext.MachineId.ToString(),
+		MachineContext.ChangeoverDuration,
+		*MachineContext.CurrentSKU);
+	
+	return EStateTreeRunStatus::Running;
+}
+
+EStateTreeRunStatus FSTTask_Changeover::Tick(
+	FStateTreeExecutionContext& Context,
+	const float DeltaTime
+) const
+{
+	FInstanceDataType& InstanceData = Context.GetInstanceData(*this);
+	
+	if (!InstanceData.MachineContext)
+	{
+		return EStateTreeRunStatus::Failed;
+	}
+	
+	auto& MachineContext = InstanceData.MachineContext->GetMutableContext();
+	
+	// Accumulate time
+	MachineContext.TimeInState += DeltaTime;
+	
+	// Check if changeover is complete
+	if (MachineContext.TimeInState >= MachineContext.ChangeoverDuration)
+	{
+		UE_LOG(LogPraxisSim, Log, 
+			TEXT("[%s] Changeover complete - Ready to produce %s"),
+			*MachineContext.MachineId.ToString(),
+			*MachineContext.CurrentSKU);
+		
+		return EStateTreeRunStatus::Succeeded;
+	}
+	
+	// Continue changeover
+	return EStateTreeRunStatus::Running;
+}
+
+void FSTTask_Changeover::ExitState(
+	FStateTreeExecutionContext& Context,
+	const FStateTreeTransitionResult& Transition
+) const
+{
+	FInstanceDataType& InstanceData = Context.GetInstanceData(*this);
+	
+	if (!InstanceData.MachineContext)
+	{
+		return;
+	}
+	
+	auto& MachineContext = InstanceData.MachineContext->GetMutableContext();
+	
+	UE_LOG(LogPraxisSim, Verbose, 
+		TEXT("[%s] Changeover task exited - Time spent: %.1f seconds"),
+		*MachineContext.MachineId.ToString(),
+		MachineContext.TimeInState);
+}

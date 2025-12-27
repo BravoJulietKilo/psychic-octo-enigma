@@ -1,0 +1,18 @@
+// Copyright 2025 Celsian Pty Ltd
+
+#include "StateTrees/Conditions/STCondition_HasWorkOrder.h"
+#include "Components/MachineContextComponent.h"
+#include "StateTreeExecutionContext.h"
+
+bool FSTCondition_HasWorkOrder::TestCondition(FStateTreeExecutionContext& Context) const
+{
+	const FInstanceDataType& InstanceData = Context.GetInstanceData(*this);
+	
+	if (!InstanceData.MachineContext)
+	{
+		return false;
+	}
+	
+	const auto& MachineContext = InstanceData.MachineContext->GetContext();
+	return MachineContext.bHasActiveWorkOrder;
+}

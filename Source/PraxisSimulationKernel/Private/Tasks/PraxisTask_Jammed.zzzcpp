@@ -1,0 +1,91 @@
+// Copyright 2025 Celsian Pty Ltd
+
+#include "Tasks/PraxisTask_Jammed.h"
+#include "PraxisSimulationKernel.h"
+#include "PraxisRandomService.h"
+#include "PraxisMetricsSubsystem.h"  // ADD THIS - was missing
+#include "StateTreeExecutionContext.h"
+
+EStateTreeRunStatus FPraxisTask_Jammed::EnterState(
+	FStateTreeExecutionContext& Context, 
+	const FStateTreeTransitionResult& Transition) const
+{
+	Super::EnterState(Context, Transition);
+	
+	FPraxisMachineTaskInstanceData& InstanceData = Context.GetInstanceData(*this);
+	FPraxisMachineContext& MachineCtx = Context.GetExternalData(MachineContextHandle);
+	
+	// Generate random jam duration using exponential distribution
+	// Channel 0 = Machine breakdowns (as per our convention)
+	if (InstanceData.RandomService)
+	{
+		MachineCtx.JamDurationRemaining = InstanceData.RandomService->ExponentialFromMean_Key(
+			MachineCtx.MachineId,
+			0,  // Channel 0: Breakdowns
+			MachineCtx.MeanJamDuration
+		);
+	}
+	else
+	{
+		// Fallback if RandomService unavailable
+		MachineCtx.JamDurationRemaining = MachineCtx.MeanJamDuration;
+		UE_LOG(LogPraxisSim, Warning, 
+			TEXT("[%s] RandomService unavailable - using mean jam duration"), 
+			*MachineCtx.MachineId.ToString());
+	}
+	
+	MachineCtx.TimeInState = 0.0f;
+	
+	UE_LOG(LogPraxisSim, Warning, 
+		TEXT("[%s] JAM occurred! Repair duration: %.1f seconds"), 
+		*MachineCtx.MachineId.ToString(), 
+		MachineCtx.JamDurationRemaining);
+	
+	// Record jam event
+	if (InstanceData.Metrics)
+	{
+		InstanceData.Metrics->RecordMachineEvent(
+			MachineCtx.MachineId, 
+			TEXT("Jam"), 
+			GetSimTime(InstanceData));
+	}
+	
+	return EStateTreeRunStatus::Running;
+}
+
+EStateTreeRunStatus FPraxisTask_Jammed::Tick(
+	FStateTreeExecutionContext& Context, 
+	const float DeltaTime) const
+{
+	const FPraxisMachineTaskInstanceData& InstanceData = Context.GetInstanceData(*this);
+	FPraxisMachineContext& MachineCtx = Context.GetExternalData(MachineContextHandle);
+	
+	// Update time tracking
+	MachineCtx.TimeInState += DeltaTime;
+	MachineCtx.JamDurationRemaining -= DeltaTime;
+	
+	// Check if jam is cleared
+	if (MachineCtx.JamDurationRemaining <= 0.0f)
+	{
+		MachineCtx.JamDurationRemaining = 0.0f;
+		
+		UE_LOG(LogPraxisSim, Log, 
+			TEXT("[%s] Jam cleared after %.1f seconds - returning to Processing"), 
+			*MachineCtx.MachineId.ToString(),
+			MachineCtx.TimeInState);
+		
+		// Record jam resolution
+		if (InstanceData.Metrics)
+		{
+			InstanceData.Metrics->RecordMachineEvent(
+				MachineCtx.MachineId, 
+				TEXT("JamCleared"), 
+				GetSimTime(InstanceData));
+		}
+		
+		return EStateTreeRunStatus::Succeeded;  // Transition back to Processing
+	}
+	
+	// Still jammed
+	return EStateTreeRunStatus::Running;
+}

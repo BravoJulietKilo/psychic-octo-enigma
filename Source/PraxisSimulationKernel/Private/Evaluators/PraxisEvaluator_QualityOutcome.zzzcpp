@@ -1,0 +1,71 @@
+// Copyright 2025 Celsian Pty Ltd
+
+#include "Evaluators/PraxisEvaluator_QualityOutcome.h"
+#include "PraxisSimulationKernel.h"
+#include "PraxisRandomService.h"
+#include "StateTreeExecutionContext.h"
+
+void FPraxisEvaluator_QualityOutcome::TreeStart(FStateTreeExecutionContext& Context) const
+{
+	// Get instance data
+	FPraxisEvaluator_QualityOutcomeInstanceData& InstanceData = Context.GetInstanceData(*this);
+	
+	// Resolve RandomService
+	if (AActor* Owner = Cast<AActor>(Context.GetOwner()))
+	{
+		if (UWorld* World = Owner->GetWorld())
+		{
+			if (UGameInstance* GI = World->GetGameInstance())
+			{
+				InstanceData.RandomService = GI->GetSubsystem<UPraxisRandomService>();
+				
+				if (!InstanceData.RandomService)
+				{
+					UE_LOG(LogPraxisSim, Warning, 
+						TEXT("QualityOutcome Evaluator: RandomService not found!"));
+				}
+			}
+		}
+	}
+}
+
+void FPraxisEvaluator_QualityOutcome::Tick(
+	FStateTreeExecutionContext& Context, 
+	const float DeltaTime) const
+{
+	FPraxisEvaluator_QualityOutcomeInstanceData& InstanceData = Context.GetInstanceData(*this);
+	const FPraxisMachineContext& MachineCtx = Context.GetExternalData(MachineContextHandle);
+	
+	if (!InstanceData.RandomService)
+	{
+		InstanceData.bShouldProduceScrap = false;
+		InstanceData.bIsRunningSlow = false;
+		return;
+	}
+	
+	// Determine if this production cycle should produce scrap
+	// Channel 2 = Quality defects
+	const float ScrapRoll = InstanceData.RandomService->Uniform_Key(
+		MachineCtx.MachineId,
+		2,  // Channel 2: Quality
+		0.0f,
+		1.0f
+	);
+	InstanceData.bShouldProduceScrap = (ScrapRoll < MachineCtx.ScrapRate);
+	
+	// Determine if running at slow speed
+	// Channel 4 = Processing time variations
+	const float SlowRoll = InstanceData.RandomService->Uniform_Key(
+		MachineCtx.MachineId,
+		4,  // Channel 4: Processing time variations
+		0.0f,
+		1.0f
+	);
+	InstanceData.bIsRunningSlow = (SlowRoll < SlowRunProbability);
+	
+	UE_LOG(LogPraxisSim, VeryVerbose, 
+		TEXT("[%s] Quality evaluation: Scrap=%s, Slow=%s"), 
+		*MachineCtx.MachineId.ToString(),
+		InstanceData.bShouldProduceScrap ? TEXT("YES") : TEXT("NO"),
+		InstanceData.bIsRunningSlow ? TEXT("YES") : TEXT("NO"));
+}

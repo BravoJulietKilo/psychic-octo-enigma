@@ -1,0 +1,91 @@
+// Copyright 2025 Celsian Pty Ltd
+
+#include "StateTrees/Tasks/STTask_JamRecovery.h"
+#include "Components/MachineContextComponent.h"
+#include "PraxisRandomService.h"
+#include "PraxisSimulationKernel.h"
+#include "StateTreeExecutionContext.h"
+
+// ════════════════════════════════════════════════════════════════════════════════
+// Task Lifecycle
+// ════════════════════════════════════════════════════════════════════════════════
+
+EStateTreeRunStatus FSTTask_JamRecovery::EnterState(
+	FStateTreeExecutionContext& Context,
+	const FStateTreeTransitionResult& Transition
+) const
+{
+	FInstanceDataType& InstanceData = Context.GetInstanceData(*this);
+	
+	if (!InstanceData.MachineContext || !InstanceData.RandomService)
+	{
+		UE_LOG(LogPraxisSim, Error, TEXT("STTask_JamRecovery: MachineContext or RandomService is null!"));
+		return EStateTreeRunStatus::Failed;
+	}
+	
+	auto& MachineContext = InstanceData.MachineContext->GetMutableContext();
+	
+	// Sample jam duration from exponential distribution
+	InstanceData.JamDuration = InstanceData.RandomService->GetExponential(MachineContext.MeanJamDuration);
+	
+	// Reset time in state
+	MachineContext.TimeInState = 0.0f;
+	
+	UE_LOG(LogPraxisSim, Warning, 
+		TEXT("[%s] JAM OCCURRED! Recovery time: %.1f seconds"),
+		*MachineContext.MachineId.ToString(),
+		InstanceData.JamDuration);
+	
+	return EStateTreeRunStatus::Running;
+}
+
+EStateTreeRunStatus FSTTask_JamRecovery::Tick(
+	FStateTreeExecutionContext& Context,
+	const float DeltaTime
+) const
+{
+	FInstanceDataType& InstanceData = Context.GetInstanceData(*this);
+	
+	if (!InstanceData.MachineContext)
+	{
+		return EStateTreeRunStatus::Failed;
+	}
+	
+	auto& MachineContext = InstanceData.MachineContext->GetMutableContext();
+	
+	// Accumulate time
+	MachineContext.TimeInState += DeltaTime;
+	
+	// Check if recovery is complete
+	if (MachineContext.TimeInState >= InstanceData.JamDuration)
+	{
+		UE_LOG(LogPraxisSim, Log, 
+			TEXT("[%s] Jam recovery complete - Resuming production"),
+			*MachineContext.MachineId.ToString());
+		
+		return EStateTreeRunStatus::Succeeded;
+	}
+	
+	// Continue recovery
+	return EStateTreeRunStatus::Running;
+}
+
+void FSTTask_JamRecovery::ExitState(
+	FStateTreeExecutionContext& Context,
+	const FStateTreeTransitionResult& Transition
+) const
+{
+	FInstanceDataType& InstanceData = Context.GetInstanceData(*this);
+	
+	if (!InstanceData.MachineContext)
+	{
+		return;
+	}
+	
+	auto& MachineContext = InstanceData.MachineContext->GetMutableContext();
+	
+	UE_LOG(LogPraxisSim, Verbose, 
+		TEXT("[%s] Jam recovery task exited - Time spent: %.1f seconds"),
+		*MachineContext.MachineId.ToString(),
+		MachineContext.TimeInState);
+}

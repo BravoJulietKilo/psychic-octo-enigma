@@ -1,0 +1,65 @@
+// Copyright 2025 Celsian Pty Ltd
+
+#pragma once
+
+#include "CoreMinimal.h"
+#include "StateTreeEvaluatorBase.h"
+#include "StateTreeLinker.h"
+//#include "PraxisMachineContext.h"
+#include "PraxisEvaluator_QualityOutcome.generated.h"
+
+class UPraxisRandomService;
+
+/**
+ * Instance data for QualityOutcome evaluator
+ */
+USTRUCT()
+struct FPraxisEvaluator_QualityOutcomeInstanceData
+{
+	GENERATED_BODY()
+
+	UPROPERTY()
+	TObjectPtr<UPraxisRandomService> RandomService = nullptr;
+	
+	/** Output: True if next unit should be scrap */
+	UPROPERTY()
+	bool bShouldProduceScrap = false;
+	
+	/** Output: True if running at slow speed */
+	UPROPERTY()
+	bool bIsRunningSlow = false;
+};
+
+/**
+ * FPraxisEvaluator_QualityOutcome
+ * 
+ * Determines quality outcome for production (good vs scrap, normal vs slow speed).
+ * Updates instance data that can be used by child state selection or transitions.
+ * 
+ * In your StateTree, you can use these boolean outputs in transition conditions
+ * or state selection logic.
+ */
+USTRUCT()
+struct PRAXISSIMULATIONKERNEL_API FPraxisEvaluator_QualityOutcome : public FStateTreeEvaluatorBase
+{
+	GENERATED_BODY()
+	
+	using FInstanceDataType = FPraxisEvaluator_QualityOutcomeInstanceData;
+
+	virtual bool Link(FStateTreeLinker& Linker) override
+	{
+		Linker.LinkExternalData(MachineContextHandle);
+		return true;
+	}
+
+protected:
+	virtual void TreeStart(FStateTreeExecutionContext& Context) const override;
+	virtual void Tick(FStateTreeExecutionContext& Context, const float DeltaTime) const override;
+
+private:
+	TStateTreeExternalDataHandle<FPraxisMachineContext> MachineContextHandle;
+	
+	/** Configuration: Probability of running slow (0.0 - 1.0) */
+	UPROPERTY(EditAnywhere, Category = "Quality", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float SlowRunProbability = 0.1f;
+};

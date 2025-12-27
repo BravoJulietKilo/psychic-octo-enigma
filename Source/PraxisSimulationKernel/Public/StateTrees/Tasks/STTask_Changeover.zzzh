@@ -1,0 +1,62 @@
+// Copyright 2025 Celsian Pty Ltd
+#pragma once
+
+#include "CoreMinimal.h"
+#include "StateTreeTaskBase.h"
+#include "STTask_Changeover.generated.h"
+
+// Forward declarations
+class UMachineContextComponent;
+
+/**
+ * Instance data for the Changeover task
+ */
+USTRUCT()
+struct FSTTask_ChangeoverInstanceData
+{
+	GENERATED_BODY()
+
+	/** Reference to the machine context component */
+	// TO DO - fix when MachineLogicComponent is repaired
+	//UPROPERTY(EditAnywhere, Category = "Context")
+	//TObjectPtr<UMachineContextComponent> MachineContext = nullptr;
+};
+
+/**
+ * STTask_Changeover
+ * 
+ * Handles machine changeover/setup time:
+ * - Accumulates time until ChangeoverDuration is reached
+ * - Returns Success when changeover complete
+ * - Uses TimeInState from context to track elapsed time
+ */
+USTRUCT(DisplayName = "Changeover")
+struct PRAXISSIMULATIONKERNEL_API FSTTask_Changeover : public FStateTreeTaskBase
+{
+	GENERATED_BODY()
+
+	using FInstanceDataType = FSTTask_ChangeoverInstanceData;
+
+	FSTTask_Changeover() = default;
+
+	// ═══════════════════════════════════════════════════════════════════════════
+	// FStateTreeTaskBase Interface
+	// ═══════════════════════════════════════════════════════════════════════════
+
+	virtual const UStruct* GetInstanceDataType() const override { return FInstanceDataType::StaticStruct(); }
+
+	virtual EStateTreeRunStatus EnterState(
+		FStateTreeExecutionContext& Context,
+		const FStateTreeTransitionResult& Transition
+	) const override;
+
+	virtual EStateTreeRunStatus Tick(
+		FStateTreeExecutionContext& Context,
+		const float DeltaTime
+	) const override;
+
+	virtual void ExitState(
+		FStateTreeExecutionContext& Context,
+		const FStateTreeTransitionResult& Transition
+	) const override;
+};

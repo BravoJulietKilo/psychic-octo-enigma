@@ -1,0 +1,143 @@
+// Copyright 2025 Celsian Pty Ltd
+
+#include "Tasks/PraxisTask_ProduceOutput.h"
+#include "PraxisSimulationKernel.h"
+#include "StateTreeExecutionContext.h"
+#include "PraxisMetricsSubsystem.h"
+#include "PraxisRandomService.h"  // ADD THIS - was missing
+
+EStateTreeRunStatus FPraxisTask_ProduceOutput::EnterState(
+	FStateTreeExecutionContext& Context, 
+	const FStateTreeTransitionResult& Transition) const
+{
+	Super::EnterState(Context, Transition);
+	
+	const FPraxisMachineTaskInstanceData& InstanceData = Context.GetInstanceData(*this);
+	FPraxisMachineContext& MachineCtx = Context.GetExternalData(MachineContextHandle);
+	
+	// Reset production state
+	MachineCtx.ProductionAccumulator = 0.0f;
+	MachineCtx.TimeInState = 0.0f;
+	
+	UE_LOG(LogPraxisSim, Log, 
+		TEXT("[%s] Entered Processing state - Target: %d units of %s"), 
+		*MachineCtx.MachineId.ToString(),
+		MachineCtx.CurrentWorkOrder.Quantity,
+		*MachineCtx.CurrentWorkOrder.SKU);
+	
+	return EStateTreeRunStatus::Running;
+}
+
+EStateTreeRunStatus FPraxisTask_ProduceOutput::Tick(
+	FStateTreeExecutionContext& Context, 
+	const float DeltaTime) const
+{
+	FPraxisMachineTaskInstanceData& InstanceData = Context.GetInstanceData(*this);
+	FPraxisMachineContext& MachineCtx = Context.GetExternalData(MachineContextHandle);
+	
+	// Update time in state
+	MachineCtx.TimeInState += DeltaTime;
+	
+	// Get effective production rate (may be reduced if in "Slow" child state)
+	const float EffectiveRate = GetEffectiveProductionRate(Context, MachineCtx);
+	
+	// Accumulate fractional production
+	MachineCtx.ProductionAccumulator += EffectiveRate * DeltaTime;
+	
+	// Complete whole units
+	while (MachineCtx.ProductionAccumulator >= 1.0f)
+	{
+		MachineCtx.ProductionAccumulator -= 1.0f;
+		
+		// Determine quality (good vs scrap)
+		const bool bIsScrap = DetermineIfScrap(Context, MachineCtx);
+		
+		if (bIsScrap)
+		{
+			MachineCtx.ScrapCounter++;
+			
+			// Record metric using RecordMachineEvent
+			if (InstanceData.Metrics)
+			{
+				InstanceData.Metrics->RecordMachineEvent(
+					MachineCtx.MachineId, 
+					TEXT("Scrap"),
+					GetSimTime(InstanceData));
+			}
+			
+			UE_LOG(LogPraxisSim, Verbose, 
+				TEXT("[%s] Produced SCRAP (total scrap: %d)"), 
+				*MachineCtx.MachineId.ToString(), 
+				MachineCtx.ScrapCounter);
+		}
+		else
+		{
+			MachineCtx.OutputCounter++;
+			
+			// Record metric
+			if (InstanceData.Metrics)
+			{
+				InstanceData.Metrics->RecordProduction(
+					MachineCtx.MachineId, 
+					1.0, 
+					GetTickCount(InstanceData));
+			}
+			
+			UE_LOG(LogPraxisSim, Verbose, 
+				TEXT("[%s] Produced GOOD unit (total output: %d/%d)"), 
+				*MachineCtx.MachineId.ToString(), 
+				MachineCtx.OutputCounter,
+				MachineCtx.CurrentWorkOrder.Quantity);
+		}
+	}
+	
+	// Check if work order is complete
+	if (MachineCtx.IsWorkOrderComplete())
+	{
+		UE_LOG(LogPraxisSim, Log, 
+			TEXT("[%s] Work order complete: %d good + %d scrap = %d total units"), 
+			*MachineCtx.MachineId.ToString(),
+			MachineCtx.OutputCounter,
+			MachineCtx.ScrapCounter,
+			MachineCtx.GetTotalUnitsProduced());
+		
+		return EStateTreeRunStatus::Succeeded;  // Transition to Completed
+	}
+	
+	// Continue running
+	return EStateTreeRunStatus::Running;
+}
+
+bool FPraxisTask_ProduceOutput::DetermineIfScrap(
+	FStateTreeExecutionContext& Context, 
+	const FPraxisMachineContext& MachineCtx) const
+{
+	// For now, use simple random chance based on ScrapRate
+	// Later we'll enhance this to check child states via evaluators
+	
+	const FPraxisMachineTaskInstanceData& InstanceData = Context.GetInstanceData(*this);
+	if (!InstanceData.RandomService)
+	{
+		return false;  // Default to good if no random service
+	}
+	
+	// Use uniform random to determine if this unit is scrap
+	// Channel 2 = Quality defects (as per our convention)
+	const float RandomValue = InstanceData.RandomService->Uniform_Key(
+		MachineCtx.MachineId,
+		2,  // Channel 2: Quality
+		0.0f,
+		1.0f
+	);
+	
+	return RandomValue < MachineCtx.ScrapRate;
+}
+
+float FPraxisTask_ProduceOutput::GetEffectiveProductionRate(
+	FStateTreeExecutionContext& Context, 
+	const FPraxisMachineContext& MachineCtx) const
+{
+	// For now, return base rate
+	// Later we'll check child states to determine if we're in "Slow" mode
+	return MachineCtx.ProductionRate;
+}

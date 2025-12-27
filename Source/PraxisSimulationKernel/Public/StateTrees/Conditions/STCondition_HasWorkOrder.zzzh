@@ -1,0 +1,47 @@
+// Copyright 2025 Celsian Pty Ltd
+#pragma once
+
+#include "CoreMinimal.h"
+#include "StateTreeConditionBase.h"
+#include "STCondition_HasWorkOrder.generated.h"
+
+// Forward declarations
+class UMachineContextComponent;
+
+/**
+ * Instance data for the Has Work Order condition
+ */
+USTRUCT()
+struct FSTCondition_HasWorkOrderInstanceData
+{
+	GENERATED_BODY()
+
+	/** Reference to the machine context component */
+	// TO DO - fix when MachineLogicComponent is repaired
+	//UPROPERTY(EditAnywhere, Category = "Context")
+	//TObjectPtr<UMachineContextComponent> MachineContext = nullptr;
+};
+
+/**
+ * STCondition_HasWorkOrder
+ * 
+ * Checks if the machine has an active work order
+ * Used as an enter condition for Changeover state
+ */
+USTRUCT(DisplayName = "Has Work Order")
+struct PRAXISSIMULATIONKERNEL_API FSTCondition_HasWorkOrder : public FStateTreeConditionBase
+{
+	GENERATED_BODY()
+
+	using FInstanceDataType = FSTCondition_HasWorkOrderInstanceData;
+
+	FSTCondition_HasWorkOrder() = default;
+
+	// ═══════════════════════════════════════════════════════════════════════════
+	// FStateTreeConditionBase Interface
+	// ═══════════════════════════════════════════════════════════════════════════
+
+	virtual const UStruct* GetInstanceDataType() const override { return FInstanceDataType::StaticStruct(); }
+
+	virtual bool TestCondition(FStateTreeExecutionContext& Context) const override;
+};

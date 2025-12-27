@@ -1,0 +1,74 @@
+// Copyright 2025 Celsian Pty Ltd
+
+#pragma once
+
+#include "CoreMinimal.h"
+#include "StateTreeTaskBase.h"
+#include "StateTreeExecutionContext.h"
+#include "PraxisMachineTaskBase.generated.h"
+
+// Forward declarations
+class UPraxisOrchestrator;
+class UPraxisRandomService;
+class UPraxisMetricsSubsystem;
+
+/**
+ * UPraxisMachineTaskBase
+ * 
+ * Base class for all machine StateTree tasks.
+ * Provides common functionality: service resolution, simulation time access, logging.
+ * 
+ * All machine tasks should inherit from this class.
+ */
+USTRUCT()
+struct PRAXISSIMULATIONKERNEL_API FPraxisMachineTaskBase : public FStateTreeTaskBase
+{
+	GENERATED_BODY()
+	
+	using FInstanceDataType = FPraxisMachineTaskInstanceData;
+
+protected:
+	// ═══════════════════════════════════════════════════════════════════════════
+	// StateTree Lifecycle (override in derived classes)
+	// ═══════════════════════════════════════════════════════════════════════════
+	
+	virtual EStateTreeRunStatus EnterState(FStateTreeExecutionContext& Context, const FStateTreeTransitionResult& Transition) const override;
+	virtual void ExitState(FStateTreeExecutionContext& Context, const FStateTreeTransitionResult& Transition) const override;
+	virtual EStateTreeRunStatus Tick(FStateTreeExecutionContext& Context, const float DeltaTime) const override;
+
+protected:
+	// ═══════════════════════════════════════════════════════════════════════════
+	// Helper Functions (available to all derived tasks)
+	// ═══════════════════════════════════════════════════════════════════════════
+	
+	/** Resolve service references */
+	void ResolveServices(FStateTreeExecutionContext& Context, FPraxisMachineTaskInstanceData& InstanceData) const;
+	
+	/** Get current simulation time from Orchestrator */
+	FDateTime GetSimTime(const FPraxisMachineTaskInstanceData& InstanceData) const;
+	
+	/** Get current simulation tick count */
+	int32 GetTickCount(const FPraxisMachineTaskInstanceData& InstanceData) const;
+	
+	/** Get tick interval (fixed DES step size) */
+	float GetTickInterval(const FPraxisMachineTaskInstanceData& InstanceData) const;
+};
+
+/**
+ * Instance data for machine tasks
+ * This holds the per-instance state (service pointers)
+ */
+USTRUCT()
+struct PRAXISSIMULATIONKERNEL_API FPraxisMachineTaskInstanceData
+{
+	GENERATED_BODY()
+
+	UPROPERTY()
+	TObjectPtr<UPraxisOrchestrator> Orchestrator = nullptr;
+	
+	UPROPERTY()
+	TObjectPtr<UPraxisRandomService> RandomService = nullptr;
+	
+	UPROPERTY()
+	TObjectPtr<UPraxisMetricsSubsystem> Metrics = nullptr;
+};

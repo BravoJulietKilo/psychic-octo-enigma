@@ -1,0 +1,56 @@
+// Copyright 2025 Celsian Pty Ltd
+
+#include "Tasks/PraxisTask_Idle.h"
+#include "PraxisSimulationKernel.h"
+#include "StateTreeExecutionContext.h"
+
+EStateTreeRunStatus FPraxisTask_Idle::EnterState(
+	FStateTreeExecutionContext& Context, 
+	const FStateTreeTransitionResult& Transition) const
+{
+	// Call base to resolve services
+	Super::EnterState(Context, Transition);
+	
+	// Get instance data (for services)
+	const FPraxisMachineTaskInstanceData& InstanceData = Context.GetInstanceData(*this);
+	
+	// Get machine context via handle
+	FPraxisMachineContext& MachineCtx = Context.GetExternalData(MachineContextHandle);
+	
+	// Log entry
+	UE_LOG(LogPraxisSim, Log, 
+		TEXT("[%s] Entered Idle state at tick %d"), 
+		*MachineCtx.MachineId.ToString(), 
+		GetTickCount(InstanceData));
+	
+	// Reset time in state
+	MachineCtx.TimeInState = 0.0f;
+	
+	return EStateTreeRunStatus::Running;
+}
+
+EStateTreeRunStatus FPraxisTask_Idle::Tick(
+	FStateTreeExecutionContext& Context, 
+	const float DeltaTime) const
+{
+	// Get machine context via handle
+	FPraxisMachineContext& MachineCtx = Context.GetExternalData(MachineContextHandle);
+	
+	// Track time in idle
+	MachineCtx.TimeInState += DeltaTime;
+	
+	// Check if work order has been assigned
+	if (MachineCtx.bHasActiveWorkOrder)
+	{
+		UE_LOG(LogPraxisSim, Log, 
+			TEXT("[%s] Work order assigned: %s (Qty: %d) - transitioning to Changeover"), 
+			*MachineCtx.MachineId.ToString(),
+			*MachineCtx.CurrentWorkOrder.SKU,
+			MachineCtx.CurrentWorkOrder.Quantity);
+		
+		return EStateTreeRunStatus::Succeeded;  // Trigger transition to Changeover
+	}
+	
+	// Still waiting
+	return EStateTreeRunStatus::Running;
+}

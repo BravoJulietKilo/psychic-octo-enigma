@@ -1,0 +1,56 @@
+// Copyright 2025 Celsian Pty Ltd
+
+#pragma once
+
+#include "CoreMinimal.h"
+#include "StateTreeEvaluatorBase.h"
+#include "StateTreeLinker.h"
+//#include "PraxisMachineContext.h"
+#include "GameplayTagContainer.h"
+#include "PraxisEvaluator_RandomJam.generated.h"
+
+// Forward declarations
+class UPraxisRandomService;
+
+/**
+ * Instance data for RandomJam evaluator
+ */
+USTRUCT()
+struct FPraxisEvaluator_RandomJamInstanceData
+{
+	GENERATED_BODY()
+
+	UPROPERTY()
+	TObjectPtr<UPraxisRandomService> RandomService = nullptr;
+};
+
+/**
+ * FPraxisEvaluator_RandomJam
+ * 
+ * Evaluates whether a jam should occur this tick.
+ * Uses Poisson process (EventOccursInStep_Key) with machine's JamProbabilityPerTick.
+ * Sends "MachineStatus.Fault" event when jam occurs, triggering transition to Fault state.
+ */
+USTRUCT()
+struct PRAXISSIMULATIONKERNEL_API FPraxisEvaluator_RandomJam : public FStateTreeEvaluatorBase
+{
+	GENERATED_BODY()
+	
+	using FInstanceDataType = FPraxisEvaluator_RandomJamInstanceData;
+
+	virtual bool Link(FStateTreeLinker& Linker) override
+	{
+		Linker.LinkExternalData(MachineContextHandle);
+		return true;
+	}
+
+protected:
+	virtual void TreeStart(FStateTreeExecutionContext& Context) const override;
+	virtual void Tick(FStateTreeExecutionContext& Context, const float DeltaTime) const override;
+
+private:
+	TStateTreeExternalDataHandle<FPraxisMachineContext> MachineContextHandle;
+	
+	/** Gameplay tag for fault events */
+	static const FGameplayTag FaultTag;
+};

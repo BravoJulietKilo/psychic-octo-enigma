@@ -1,0 +1,112 @@
+// Copyright 2025 Celsian Pty Ltd
+#pragma once
+
+#include "CoreMinimal.h"
+#include "Components/ActorComponent.h"
+#include "MachineContext.h"
+#include "MachineContextComponent.generated.h"
+
+/**
+ * UMachineContextComponent
+ * 
+ * Exposes FPraxisMachineContext as a component that can be accessed by StateTree tasks.
+ * This allows StateTree to read and write machine state using standard component bindings.
+ * 
+ * Usage in StateTree:
+ * - Bind task variables to "Actor > Machine Context > [Property]"
+ * - Read/write any property from FPraxisMachineContext
+ */
+UCLASS(ClassGroup=(Praxis), meta=(BlueprintSpawnableComponent))
+class PRAXISSIMULATIONKERNEL_API UMachineContextComponent : public UActorComponent
+{
+	GENERATED_BODY()
+
+public:
+	UMachineContextComponent();
+
+	// ═══════════════════════════════════════════════════════════════════════════
+	// Public Accessors (for StateTree bindings)
+	// ═══════════════════════════════════════════════════════════════════════════
+	
+	/** Get the full machine context (for reading multiple properties at once) */
+	UFUNCTION(BlueprintPure, Category = "Machine Context")
+	const FMachineContext& GetContext() const { return Context; }
+	
+	/** Get mutable context (for tasks that need to modify state) */
+	UFUNCTION(BlueprintCallable, Category = "Machine Context")
+	FMachineContext& GetMutableContext() { return Context; }
+
+	// ═══════════════════════════════════════════════════════════════════════════
+	// Individual Property Accessors (for convenience)
+	// ═══════════════════════════════════════════════════════════════════════════
+	
+	UFUNCTION(BlueprintPure, Category = "Machine Context")
+	FName GetMachineId() const { return Context.MachineId; }
+	
+	UFUNCTION(BlueprintPure, Category = "Machine Context")
+	bool HasActiveWorkOrder() const { return Context.bHasActiveWorkOrder; }
+	
+	UFUNCTION(BlueprintPure, Category = "Machine Context")
+	FString GetCurrentSKU() const { return Context.CurrentSKU; }
+	
+	UFUNCTION(BlueprintPure, Category = "Machine Context")
+	int32 GetTargetQuantity() const { return Context.TargetQuantity; }
+	
+	UFUNCTION(BlueprintPure, Category = "Machine Context")
+	int32 GetOutputCounter() const { return Context.OutputCounter; }
+	
+	UFUNCTION(BlueprintPure, Category = "Machine Context")
+	int32 GetScrapCounter() const { return Context.ScrapCounter; }
+	
+	UFUNCTION(BlueprintPure, Category = "Machine Context")
+	float GetProductionAccumulator() const { return Context.ProductionAccumulator; }
+	
+	UFUNCTION(BlueprintPure, Category = "Machine Context")
+	float GetTimeInState() const { return Context.TimeInState; }
+
+	// ═══════════════════════════════════════════════════════════════════════════
+	// Setters (for tasks that modify state)
+	// ═══════════════════════════════════════════════════════════════════════════
+	
+	UFUNCTION(BlueprintCallable, Category = "Machine Context")
+	void SetHasActiveWorkOrder(bool bActive) { Context.bHasActiveWorkOrder = bActive; }
+	
+	UFUNCTION(BlueprintCallable, Category = "Machine Context")
+	void IncrementOutput() { Context.OutputCounter++; }
+	
+	UFUNCTION(BlueprintCallable, Category = "Machine Context")
+	void IncrementScrap() { Context.ScrapCounter++; }
+	
+	UFUNCTION(BlueprintCallable, Category = "Machine Context")
+	void AddProductionProgress(float Amount) { Context.ProductionAccumulator += Amount; }
+	
+	UFUNCTION(BlueprintCallable, Category = "Machine Context")
+	void AddTimeInState(float DeltaTime) { Context.TimeInState += DeltaTime; }
+	
+	UFUNCTION(BlueprintCallable, Category = "Machine Context")
+	void ResetTimeInState() { Context.TimeInState = 0.0f; }
+
+	// ═══════════════════════════════════════════════════════════════════════════
+	// Configuration
+	// ═══════════════════════════════════════════════════════════════════════════
+	
+	/** Initialize the context with configuration values */
+	void InitializeContext(
+		FName InMachineId,
+		float InProductionRate,
+		float InChangeoverDuration,
+		float InScrapRate,
+		float InJamProbability,
+		float InMeanJamDuration,
+		float InSlowSpeedFactor
+	);
+
+public:
+	// ═══════════════════════════════════════════════════════════════════════════
+	// Data
+	// ═══════════════════════════════════════════════════════════════════════════
+	
+	/** The actual machine context - exposed for StateTree binding */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Machine Context")
+	FMachineContext Context;
+};

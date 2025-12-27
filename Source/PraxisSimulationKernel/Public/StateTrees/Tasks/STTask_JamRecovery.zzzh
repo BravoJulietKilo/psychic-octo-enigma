@@ -1,0 +1,71 @@
+// Copyright 2025 Celsian Pty Ltd
+#pragma once
+
+#include "CoreMinimal.h"
+#include "StateTreeTaskBase.h"
+#include "STTask_JamRecovery.generated.h"
+
+// Forward declarations
+class UMachineContextComponent;
+class UPraxisRandomService;
+
+/**
+ * Instance data for the Jam Recovery task
+ */
+USTRUCT()
+struct FSTTask_JamRecoveryInstanceData
+{
+	GENERATED_BODY()
+
+	/** Reference to the machine context component */
+	// TO DO - fix when MachineLogicComponent is repaired
+	// UPROPERTY(EditAnywhere, Category = "Context")
+	//TObjectPtr<UMachineContextComponent> MachineContext = nullptr;
+	
+	/** Reference to the random service */
+	UPROPERTY(EditAnywhere, Category = "Context")
+	TObjectPtr<UPraxisRandomService> RandomService = nullptr;
+	
+	/** Duration of this specific jam (sampled on enter) */
+	UPROPERTY()
+	float JamDuration = 0.0f;
+};
+
+/**
+ * STTask_JamRecovery
+ * 
+ * Handles machine jam recovery:
+ * - Samples a jam duration from exponential distribution on enter
+ * - Accumulates time until recovery complete
+ * - Returns Success when jam recovered
+ */
+USTRUCT(DisplayName = "Jam Recovery")
+struct PRAXISSIMULATIONKERNEL_API FSTTask_JamRecovery : public FStateTreeTaskBase
+{
+	GENERATED_BODY()
+
+	using FInstanceDataType = FSTTask_JamRecoveryInstanceData;
+
+	FSTTask_JamRecovery() = default;
+
+	// ═══════════════════════════════════════════════════════════════════════════
+	// FStateTreeTaskBase Interface
+	// ═══════════════════════════════════════════════════════════════════════════
+
+	virtual const UStruct* GetInstanceDataType() const override { return FInstanceDataType::StaticStruct(); }
+
+	virtual EStateTreeRunStatus EnterState(
+		FStateTreeExecutionContext& Context,
+		const FStateTreeTransitionResult& Transition
+	) const override;
+
+	virtual EStateTreeRunStatus Tick(
+		FStateTreeExecutionContext& Context,
+		const float DeltaTime
+	) const override;
+
+	virtual void ExitState(
+		FStateTreeExecutionContext& Context,
+		const FStateTreeTransitionResult& Transition
+	) const override;
+};

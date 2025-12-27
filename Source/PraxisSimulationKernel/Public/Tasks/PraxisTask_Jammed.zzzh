@@ -1,0 +1,43 @@
+// Copyright 2025 Celsian Pty Ltd
+
+#pragma once
+
+#include "CoreMinimal.h"
+#include "Tasks/PraxisMachineTaskBase.h"
+//#include "PraxisMachineContext.h"
+#include "StateTreeLinker.h"
+#include "PraxisTask_Jammed.generated.h"
+
+/**
+ * FPraxisTask_Jammed
+ * 
+ * Handles machine jam recovery.
+ * Generates random jam duration on entry, counts down, then transitions back to Processing.
+ */
+USTRUCT()
+struct PRAXISSIMULATIONKERNEL_API FPraxisTask_Jammed : public FPraxisMachineTaskBase
+{
+	GENERATED_BODY()
+	
+	using FInstanceDataType = FPraxisMachineTaskInstanceData;
+
+	virtual bool Link(FStateTreeLinker& Linker) override
+	{
+		Linker.LinkExternalData(MachineContextHandle);
+		return true;
+	}
+
+protected:
+	virtual EStateTreeRunStatus EnterState(
+		FStateTreeExecutionContext& Context, 
+		const FStateTreeTransitionResult& Transition
+	) const override;
+	
+	virtual EStateTreeRunStatus Tick(
+		FStateTreeExecutionContext& Context, 
+		const float DeltaTime
+	) const override;
+
+private:
+	TStateTreeExternalDataHandle<FPraxisMachineContext> MachineContextHandle;
+};

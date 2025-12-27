@@ -1,0 +1,153 @@
+// Copyright 2025 Celsian Pty Ltd
+
+#include "StateTrees/Tasks/STTask_Production.h"
+#include "Components/MachineContextComponent.h"
+#include "PraxisRandomService.h"
+#include "PraxisSimulationKernel.h"
+#include "StateTreeExecutionContext.h"
+
+// ════════════════════════════════════════════════════════════════════════════════
+// Task Lifecycle
+// ════════════════════════════════════════════════════════════════════════════════
+
+EStateTreeRunStatus FSTTask_Production::EnterState(
+	FStateTreeExecutionContext& Context,
+	const FStateTreeTransitionResult& Transition
+) const
+{
+	FInstanceDataType& InstanceData = Context.GetInstanceData(*this);
+	
+	if (!InstanceData.MachineContext)
+	{
+		UE_LOG(LogPraxisSim, Error, TEXT("STTask_Production: MachineContext is null!"));
+		return EStateTreeRunStatus::Failed;
+	}
+	
+	auto& MachineContext = InstanceData.MachineContext->GetMutableContext();
+	
+	// Reset production accumulator when entering production state
+	MachineContext.ProductionAccumulator = 0.0f;
+	
+	UE_LOG(LogPraxisSim, Verbose, 
+		TEXT("[%s] Production task started - Target: %d units of %s"),
+		*MachineContext.MachineId.ToString(),
+		MachineContext.TargetQuantity,
+		*MachineContext.CurrentSKU);
+	
+	return EStateTreeRunStatus::Running;
+}
+
+EStateTreeRunStatus FSTTask_Production::Tick(
+	FStateTreeExecutionContext& Context,
+	const float DeltaTime
+) const
+{
+	FInstanceDataType& InstanceData = Context.GetInstanceData(*this);
+	
+	if (!InstanceData.MachineContext)
+	{
+		return EStateTreeRunStatus::Failed;
+	}
+	
+	auto& MachineContext = InstanceData.MachineContext->GetMutableContext();
+	
+	// Check if we have a work order
+	if (!MachineContext.bHasActiveWorkOrder)
+	{
+		UE_LOG(LogPraxisSim, Warning, 
+			TEXT("[%s] Production task running but no active work order!"),
+			*MachineContext.MachineId.ToString());
+		return EStateTreeRunStatus::Failed;
+	}
+	
+	// Accumulate production progress
+	// Production rate is in units per second
+	const float ProductionProgress = MachineContext.ProductionRate * DeltaTime;
+	MachineContext.ProductionAccumulator += ProductionProgress;
+	
+	// Check if we've produced one or more units
+	while (MachineContext.ProductionAccumulator >= 1.0f)
+	{
+		MachineContext.ProductionAccumulator -= 1.0f;
+		
+		// Determine if this unit is good or scrap
+		if (ShouldScrapUnit(InstanceData))
+		{
+			MachineContext.ScrapCounter++;
+			
+			UE_LOG(LogPraxisSim, Verbose, 
+				TEXT("[%s] Scrapped unit (total scrap: %d)"),
+				*MachineContext.MachineId.ToString(),
+				MachineContext.ScrapCounter);
+		}
+		else
+		{
+			MachineContext.OutputCounter++;
+			
+			UE_LOG(LogPraxisSim, Verbose, 
+				TEXT("[%s] Produced good unit (total output: %d / %d)"),
+				*MachineContext.MachineId.ToString(),
+				MachineContext.OutputCounter,
+				MachineContext.CurrentWorkOrder.Quantity);
+		}
+		
+		// Check if work order is complete
+		if (MachineContext.OutputCounter >= MachineContext.TargetQuantity)
+		{
+			UE_LOG(LogPraxisSim, Log, 
+				TEXT("[%s] Work order complete! Produced: %d, Scrapped: %d"),
+				*MachineContext.MachineId.ToString(),
+				MachineContext.OutputCounter,
+				MachineContext.ScrapCounter);
+			
+			// Clear work order
+			MachineContext.bHasActiveWorkOrder = false;
+			MachineContext.CurrentSKU.Empty();
+			MachineContext.TargetQuantity = 0;
+			
+			// Work order complete - transition to Idle
+			return EStateTreeRunStatus::Succeeded;
+		}
+	}
+	
+	// Continue producing
+	return EStateTreeRunStatus::Running;
+}
+
+void FSTTask_Production::ExitState(
+	FStateTreeExecutionContext& Context,
+	const FStateTreeTransitionResult& Transition
+) const
+{
+	FInstanceDataType& InstanceData = Context.GetInstanceData(*this);
+	
+	if (!InstanceData.MachineContext)
+	{
+		return;
+	}
+	
+	auto& MachineContext = InstanceData.MachineContext->GetMutableContext();
+	
+	UE_LOG(LogPraxisSim, Verbose, 
+		TEXT("[%s] Production task exited - Output: %d, Scrap: %d"),
+		*MachineContext.MachineId.ToString(),
+		MachineContext.OutputCounter,
+		MachineContext.ScrapCounter);
+}
+
+// ════════════════════════════════════════════════════════════════════════════════
+// Helper Methods
+// ════════════════════════════════════════════════════════════════════════════════
+
+bool FSTTask_Production::ShouldScrapUnit(const FInstanceDataType& InstanceData) const
+{
+	if (!InstanceData.MachineContext || !InstanceData.RandomService)
+	{
+		return false;
+	}
+	
+	const auto& MachineContext = InstanceData.MachineContext->GetContext();
+	const float RandomValue = InstanceData.RandomService->GetUniformFloat(0.0f, 1.0f);
+	
+	return RandomValue < MachineContext.ScrapRate;
+}

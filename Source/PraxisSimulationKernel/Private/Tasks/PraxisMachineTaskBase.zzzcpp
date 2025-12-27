@@ -1,0 +1,107 @@
+// Copyright 2025 Celsian Pty Ltd
+
+#include "Tasks/PraxisMachineTaskBase.h"
+#include "PraxisSimulationKernel.h"  // for LogPraxisSim
+#include "PraxisOrchestrator.h"
+#include "PraxisRandomService.h"
+#include "PraxisMetricsSubsystem.h"
+#include "StateTreeExecutionContext.h"
+
+EStateTreeRunStatus FPraxisMachineTaskBase::EnterState(
+	FStateTreeExecutionContext& Context, 
+	const FStateTreeTransitionResult& Transition) const
+{
+	FPraxisMachineTaskInstanceData& InstanceData = Context.GetInstanceData(*this);
+	
+	// Resolve services on first entry
+	if (!InstanceData.Orchestrator)
+	{
+		ResolveServices(Context, InstanceData);
+	}
+	
+	// Default: continue running (derived classes should override)
+	return EStateTreeRunStatus::Running;
+}
+
+void FPraxisMachineTaskBase::ExitState(
+	FStateTreeExecutionContext& Context, 
+	const FStateTreeTransitionResult& Transition) const
+{
+	// Base implementation - derived classes can override
+}
+
+EStateTreeRunStatus FPraxisMachineTaskBase::Tick(
+	FStateTreeExecutionContext& Context, 
+	const float DeltaTime) const
+{
+	// Base implementation - derived classes MUST override
+	UE_LOG(LogPraxisSim, Warning, 
+		TEXT("FPraxisMachineTaskBase::Tick() called but not overridden in derived class!"));
+	return EStateTreeRunStatus::Running;
+}
+
+void FPraxisMachineTaskBase::ResolveServices(
+	FStateTreeExecutionContext& Context,
+	FPraxisMachineTaskInstanceData& InstanceData) const
+{
+	// Get owner (MachineLogicComponent's owner actor)
+	AActor* Owner = Cast<AActor>(Context.GetOwner());
+	if (!Owner)
+	{
+		UE_LOG(LogPraxisSim, Error, 
+			TEXT("FPraxisMachineTaskBase: Failed to resolve services - no owner actor"));
+		return;
+	}
+	
+	UWorld* World = Owner->GetWorld();
+	if (!World)
+	{
+		UE_LOG(LogPraxisSim, Error, 
+			TEXT("FPraxisMachineTaskBase: Failed to resolve services - no world"));
+		return;
+	}
+	
+	UGameInstance* GI = World->GetGameInstance();
+	if (!GI)
+	{
+		UE_LOG(LogPraxisSim, Error, 
+			TEXT("FPraxisMachineTaskBase: Failed to resolve services - no game instance"));
+		return;
+	}
+	
+	// Resolve subsystems
+	InstanceData.Orchestrator = GI->GetSubsystem<UPraxisOrchestrator>();
+	InstanceData.RandomService = GI->GetSubsystem<UPraxisRandomService>();
+	InstanceData.Metrics = GI->GetSubsystem<UPraxisMetricsSubsystem>();
+	
+	// Log resolution status
+	if (!InstanceData.Orchestrator)
+	{
+		UE_LOG(LogPraxisSim, Error, TEXT("FPraxisMachineTaskBase: Orchestrator not found!"));
+	}
+	if (!InstanceData.RandomService)
+	{
+		UE_LOG(LogPraxisSim, Warning, TEXT("FPraxisMachineTaskBase: RandomService not found"));
+	}
+	if (!InstanceData.Metrics)
+	{
+		UE_LOG(LogPraxisSim, Warning, TEXT("FPraxisMachineTaskBase: Metrics not found"));
+	}
+	
+	UE_LOG(LogPraxisSim, Log, TEXT("FPraxisMachineTaskBase: Services resolved successfully"));
+}
+
+FDateTime FPraxisMachineTaskBase::GetSimTime(const FPraxisMachineTaskInstanceData& InstanceData) const
+{
+	return InstanceData.Orchestrator ? InstanceData.Orchestrator->GetSimDateTimeUTC() : FDateTime::UtcNow();
+}
+
+int32 FPraxisMachineTaskBase::GetTickCount(const FPraxisMachineTaskInstanceData& InstanceData) const
+{
+	return InstanceData.Orchestrator ? InstanceData.Orchestrator->GetTickCount() : 0;
+}
+
+float FPraxisMachineTaskBase::GetTickInterval(const FPraxisMachineTaskInstanceData& InstanceData) const
+{
+	return InstanceData.Orchestrator ? InstanceData.Orchestrator->GetTickIntervalSeconds() : 0.0f;
+}

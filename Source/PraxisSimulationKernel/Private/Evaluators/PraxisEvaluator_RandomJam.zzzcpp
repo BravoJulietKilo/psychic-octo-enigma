@@ -1,0 +1,67 @@
+// Copyright 2025 Celsian Pty Ltd
+
+#include "Evaluators/PraxisEvaluator_RandomJam.h"
+#include "PraxisSimulationKernel.h"
+#include "PraxisRandomService.h"
+#include "StateTreeExecutionContext.h"
+
+// Define the fault tag (should match your StateTree event tag)
+const FGameplayTag FPraxisEvaluator_RandomJam::FaultTag = 
+	FGameplayTag::RequestGameplayTag(FName("MachineStatus.Fault"));
+
+void FPraxisEvaluator_RandomJam::TreeStart(FStateTreeExecutionContext& Context) const
+{
+	// Get instance data
+	FPraxisEvaluator_RandomJamInstanceData& InstanceData = Context.GetInstanceData(*this);
+	
+	// Resolve RandomService
+	if (AActor* Owner = Cast<AActor>(Context.GetOwner()))
+	{
+		if (UWorld* World = Owner->GetWorld())
+		{
+			if (UGameInstance* GI = World->GetGameInstance())
+			{
+				InstanceData.RandomService = GI->GetSubsystem<UPraxisRandomService>();
+				
+				if (!InstanceData.RandomService)
+				{
+					UE_LOG(LogPraxisSim, Warning, 
+						TEXT("RandomJam Evaluator: RandomService not found!"));
+				}
+			}
+		}
+	}
+}
+
+void FPraxisEvaluator_RandomJam::Tick(
+	FStateTreeExecutionContext& Context, 
+	const float DeltaTime) const
+{
+	const FPraxisEvaluator_RandomJamInstanceData& InstanceData = Context.GetInstanceData(*this);
+	const FPraxisMachineContext& MachineCtx = Context.GetExternalData(MachineContextHandle);
+	
+	// Only check for jams if we have RandomService
+	if (!InstanceData.RandomService)
+	{
+		return;
+	}
+	
+	// Check if jam occurs using Poisson process
+	// Channel 0 = Machine breakdowns
+	const bool bJamOccurs = InstanceData.RandomService->EventOccursInStep_Key(
+		MachineCtx.MachineId,
+		0,  // Channel 0: Breakdowns
+		MachineCtx.JamProbabilityPerTick,
+		DeltaTime
+	);
+	
+	if (bJamOccurs)
+	{
+		// Send fault event to trigger transition to Fault state
+		Context.SendEvent(FaultTag);
+		
+		UE_LOG(LogPraxisSim, Warning, 
+			TEXT("[%s] JAM EVENT triggered by evaluator"), 
+			*MachineCtx.MachineId.ToString());
+	}
+}
