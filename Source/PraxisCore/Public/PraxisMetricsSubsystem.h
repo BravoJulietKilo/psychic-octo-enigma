@@ -6,6 +6,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "PraxisCore.h"  // for LogPraxisSim
 #include "Subsystems/GameInstanceSubsystem.h"
 #include "PraxisMetricsSubsystem.generated.h"
 
@@ -55,7 +56,7 @@ public:
     /** Records a production metric (e.g., units produced per tick) */
     UFUNCTION(BlueprintCallable, Category = "Praxis|Metrics")
     void RecordProduction(FName MachineId, double Units, int32 TickCount);
-
+    
     /** Flushes all buffered metrics to persistent storage or analytics sink */
     UFUNCTION(BlueprintCallable, Category = "Praxis|Metrics")
     void FlushMetrics();

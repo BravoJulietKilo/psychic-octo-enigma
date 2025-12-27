@@ -1,83 +1,206 @@
 // Copyright 2025 Celsian Pty Ltd
-// UPraxisMetricsSubsystem – simulation metrics collection and flush subsystem.
 
-#include "PraxisSimulationKernel/Public/Components/MachineLogicComponent.h"
+#include "Components/MachineLogicComponent.h"
+#include "PraxisSimulationKernel.h"
+#include "PraxisOrchestrator.h"
+#include "PraxisRandomService.h"
 #include "PraxisMetricsSubsystem.h"
-#include "Misc/DateTime.h"
-#include "Misc/OutputDevice.h"
-#include "Engine/Engine.h"
+#include "StateTree.h"
+#include "Components/StateTreeComponent.h"
+#include "Engine/World.h"
+#include "Engine/GameInstance.h"
 
-// ────────────────────────────────────────────────────────────────
+// ════════════════════════════════════════════════════════════════════════════════
+// Construction
+// ════════════════════════════════════════════════════════════════════════════════
+
+UMachineLogicComponent::UMachineLogicComponent()
+{
+	PrimaryComponentTick.bCanEverTick = false; // Driven by Orchestrator, not per-frame
+}
+
+// ════════════════════════════════════════════════════════════════════════════════
 // Lifecycle
-// ────────────────────────────────────────────────────────────────
+// ════════════════════════════════════════════════════════════════════════════════
 
-void UPraxisMetricsSubsystem::Initialize(FSubsystemCollectionBase& Collection)
+void UMachineLogicComponent::OnRegister()
 {
-    Super::Initialize(Collection);
-    MetricBuffer.Reset();
-    UE_LOG(LogTemp, Log, TEXT("MetricsSubsystem initialized."));
+	Super::OnRegister();
+	
+	if (!GetOwner())
+	{
+		return;
+	}
+	
+	// Create StateTree component
+	if (!StateTreeComponent)
+	{
+		StateTreeComponent = NewObject<UStateTreeComponent>(
+			GetOwner(), 
+			UStateTreeComponent::StaticClass(), 
+			TEXT("MachineStateTree")
+		);
+		
+		if (StateTreeComponent)
+		{
+			// Pass the asset pointer directly to the component
+			StateTreeComponent->SetStateTree(const_cast<UStateTree*>(StateTreeRef.GetStateTree()));
+			
+			// Disable automatic start - we'll control it manually
+			StateTreeComponent->SetStartLogicAutomatically(false);
+			
+			// Register the component
+			StateTreeComponent->RegisterComponent();
+			
+			// Disable automatic ticking - we'll tick it manually from orchestrator
+			StateTreeComponent->SetComponentTickEnabled(false);
+			
+			UE_LOG(LogPraxisSim, Verbose, 
+				TEXT("[%s] StateTree component created"), 
+				*MachineId.ToString());
+		}
+	}
 }
 
-void UPraxisMetricsSubsystem::Deinitialize()
+void UMachineLogicComponent::BeginPlay()
 {
-    FlushMetrics();
-    UE_LOG(LogTemp, Log, TEXT("MetricsSubsystem deinitialized; buffer flushed."));
-    Super::Deinitialize();
+	Super::BeginPlay();
+
+	// Resolve core services from GameInstance
+	if (UWorld* World = GetWorld())
+	{
+		if (UGameInstance* GI = World->GetGameInstance())
+		{
+			Orchestrator = GI->GetSubsystem<UPraxisOrchestrator>();
+			RandomService = GI->GetSubsystem<UPraxisRandomService>();
+			Metrics = GI->GetSubsystem<UPraxisMetricsSubsystem>();
+		}
+	}
+
+	// Validate services
+	if (!Orchestrator)
+	{
+		UE_LOG(LogPraxisSim, Error, 
+			TEXT("[%s] MachineLogicComponent: Orchestrator not found!"), 
+			*MachineId.ToString());
+		return;
+	}
+
+	// Subscribe to orchestrator events
+	Orchestrator->OnSimTick.AddDynamic(this, &UMachineLogicComponent::HandleSimTick);
+	Orchestrator->OnEndSession.AddDynamic(this, &UMachineLogicComponent::HandleEndSession);
+	
+	// Start the StateTree
+	if (StateTreeComponent && StateTreeComponent->IsRegistered())
+	{
+		StateTreeComponent->StartLogic();
+		
+		UE_LOG(LogPraxisSim, Log, 
+			TEXT("[%s] MachineLogicComponent initialized and StateTree started"), 
+			*MachineId.ToString());
+	}
+	else
+	{
+		UE_LOG(LogPraxisSim, Warning, 
+			TEXT("[%s] MachineLogicComponent initialized WITHOUT StateTree"), 
+			*MachineId.ToString());
+	}
 }
 
-// ────────────────────────────────────────────────────────────────
-// Public Recording Interface
-// ────────────────────────────────────────────────────────────────
-
-void UPraxisMetricsSubsystem::RecordMachineEvent(
-    FName MachineId, const FString& EventType, const FDateTime& Timestamp)
+void UMachineLogicComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
-    AddEvent(MachineId, EventType, /*Value*/ 0.0);
-    UE_LOG(LogTemp, Verbose, TEXT("[%s] Event: %s @ %s"),
-        *MachineId.ToString(),
-        *EventType,
-        *Timestamp.ToString());
+	// Stop StateTree
+	if (StateTreeComponent && StateTreeComponent->IsRegistered())
+	{
+		StateTreeComponent->StopLogic(TEXT("Component EndPlay"));
+	}
+
+	// Unsubscribe from orchestrator
+	if (Orchestrator)
+	{
+		Orchestrator->OnSimTick.RemoveDynamic(this, &UMachineLogicComponent::HandleSimTick);
+		Orchestrator->OnEndSession.RemoveDynamic(this, &UMachineLogicComponent::HandleEndSession);
+	}
+
+	Super::EndPlay(EndPlayReason);
 }
 
-void UPraxisMetricsSubsystem::RecordProduction(FName MachineId, double Units, int32 TickCount)
+// ════════════════════════════════════════════════════════════════════════════════
+// Orchestrator Callbacks
+// ════════════════════════════════════════════════════════════════════════════════
+
+void UMachineLogicComponent::HandleSimTick(double SimDeltaSeconds, int32 TickCount)
 {
-    const FString EventLabel = FString::Printf(TEXT("ProductionTick_%d"), TickCount);
-    AddEvent(MachineId, EventLabel, Units);
-    UE_LOG(LogTemp, Verbose, TEXT("[%s] Production tick %d: %.2f units"),
-        *MachineId.ToString(), TickCount, Units);
+	// Manually tick the StateTree component
+	if (StateTreeComponent && StateTreeComponent->IsRegistered())
+	{
+		StateTreeComponent->TickComponent(
+			static_cast<float>(SimDeltaSeconds), 
+			LEVELTICK_All, 
+			nullptr
+		);
+	}
 }
 
-void UPraxisMetricsSubsystem::FlushMetrics()
+void UMachineLogicComponent::HandleEndSession()
 {
-    if (MetricBuffer.Num() == 0)
-    {
-        UE_LOG(LogTemp, Log, TEXT("MetricsSubsystem: No metrics to flush."));
-        return;
-    }
-
-    UE_LOG(LogTemp, Warning, TEXT("Flushing %d metric events:"), MetricBuffer.Num());
-    for (const FPraxisMetricEvent& Event : MetricBuffer)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("  [%s] %s | %.2f | %s"),
-            *Event.SourceId.ToString(),
-            *Event.EventType,
-            Event.Value,
-            *Event.TimestampUTC.ToString());
-    }
-
-    MetricBuffer.Reset();
+	// Flush any pending metrics
+	if (Metrics)
+	{
+		Metrics->FlushMetrics();
+	}
+	
+	UE_LOG(LogPraxisSim, Log, 
+		TEXT("[%s] Session ended - Final stats: %d good, %d scrap"), 
+		*MachineId.ToString(),
+		OutputCounter,
+		ScrapCounter);
 }
 
-// ────────────────────────────────────────────────────────────────
-// Internal Helper
-// ────────────────────────────────────────────────────────────────
+// ════════════════════════════════════════════════════════════════════════════════
+// Public API
+// ════════════════════════════════════════════════════════════════════════════════
 
-void UPraxisMetricsSubsystem::AddEvent(FName SourceId, const FString& Type, double Value)
+void UMachineLogicComponent::AssignWorkOrder(const FString& SKU, int32 Quantity)
 {
-    FPraxisMetricEvent E;
-    E.SourceId = SourceId;
-    E.EventType = Type;
-    E.Value = Value;
-    E.TimestampUTC = FDateTime::UtcNow();
-    MetricBuffer.Add(E);
+	// Store work order info
+	CurrentSKU = SKU;
+	CurrentQuantity = Quantity;
+	
+	// Reset counters for new work order
+	OutputCounter = 0;
+	ScrapCounter = 0;
+	
+	UE_LOG(LogPraxisSim, Log, 
+		TEXT("[%s] Work order assigned: %s (Qty: %d)"), 
+		*MachineId.ToString(),
+		*SKU,
+		Quantity);
+	
+	// Record metric
+	if (Metrics && Orchestrator)
+	{
+		Metrics->RecordMachineEvent(
+			MachineId, 
+			TEXT("WorkOrderAssigned"), 
+			Orchestrator->GetSimDateTimeUTC());
+	}
+	
+	// TODO: When we add StateTree context, send an event to trigger state change
+}
+
+FString UMachineLogicComponent::GetCurrentStateName() const
+{
+	if (StateTreeComponent)
+	{
+		const EStateTreeRunStatus Status = StateTreeComponent->GetStateTreeRunStatus();
+		return UEnum::GetValueAsString(Status);
+	}
+	
+	return TEXT("No StateTree");
+}
+
+bool UMachineLogicComponent::IsProcessing() const
+{
+	return !CurrentSKU.IsEmpty() && CurrentQuantity > 0;
 }

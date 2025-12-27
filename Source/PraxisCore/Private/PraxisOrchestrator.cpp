@@ -5,12 +5,11 @@
 #include "Engine/World.h"
 #include "TimerManager.h"
 
-// If you have these headers in different modules, adjust include paths accordingly.
 #include "PraxisSimulationKernel/Public/PraxisSimulationKernel.h"
-#include "PraxisScheduleService.h"   // UPraxisScheduleService
-#include "PraxisInventoryService.h"        // UInventoryService
-#include "PraxisMetricsSubsystem.h"  // UPraxisMetricsSubsystem
-#include "PraxisRandomService.h"          // URandomService
+#include "PraxisScheduleService.h" 
+#include "PraxisInventoryService.h" 
+#include "PraxisMetricsSubsystem.h"
+#include "PraxisRandomService.h"
 
 // ───────────────────────────────────────────────────────────────────────────────
 // Public API
@@ -42,6 +41,9 @@ void UPraxisOrchestrator::Start()
 	OnOrchestrationReady.Broadcast();
 
 	BeginSession();
+	
+	// Initialization
+	UE_LOG(LogPraxisSim, Log, TEXT("Orchestrator subsystem initialized"));
 }
 
 /**
@@ -51,7 +53,7 @@ void UPraxisOrchestrator::Pause()
 {
 	if (bPaused || Phase != TEXT("Run"))
 	{
-		UE_LOG(LogTemp, Warning, TEXT("Orchestrator Pause() ignored (already paused or not running)."));
+		UE_LOG(LogPraxisSim, Warning, TEXT("Orchestrator Pause() ignored (already paused or not running)."));
 		return;
 	}
 
@@ -63,7 +65,7 @@ void UPraxisOrchestrator::Pause()
 	// Stop the tick timer, but keep state intact
 	FixedStep_StopTimer();
 
-	UE_LOG(LogTemp, Warning, TEXT("Orchestrator paused at %s (tick %d)."), *SimClockUTC.ToString(), TickCount);
+	UE_LOG(LogPraxisSim, Warning, TEXT("Orchestrator paused at %s (tick %d)."), *SimClockUTC.ToString(), TickCount);
 }
 
 /**
@@ -73,7 +75,7 @@ void UPraxisOrchestrator::Resume()
 {
 	if (!bPaused || Phase != TEXT("Pause"))
 	{
-		UE_LOG(LogTemp, Warning, TEXT("Orchestrator Resume() ignored (not paused)."));
+		UE_LOG(LogPraxisSim, Warning, TEXT("Orchestrator Resume() ignored (not paused)."));
 		return;
 	}
 
@@ -85,7 +87,7 @@ void UPraxisOrchestrator::Resume()
 	// Restart timer at same cadence; tick count continues
 	FixedStep_StartTimer();
 
-	UE_LOG(LogTemp, Warning, TEXT("Orchestrator resumed at %s (tick %d)."), *SimClockUTC.ToString(), TickCount);
+	UE_LOG(LogPraxisSim, Warning, TEXT("Orchestrator resumed at %s (tick %d)."), *SimClockUTC.ToString(), TickCount);
 }
 
 /**
@@ -93,7 +95,7 @@ void UPraxisOrchestrator::Resume()
  */
 void UPraxisOrchestrator::Stop()
 {
-	UE_LOG(LogTemp, Warning, TEXT("Orchestrator Stop() invoked."));
+	UE_LOG(LogPraxisSim, Warning, TEXT("Orchestrator Stop() invoked."));
 	EndSession();
 }
 
@@ -118,9 +120,10 @@ void UPraxisOrchestrator::SetInstructorSimSpeedMultiplier(float InMultiplier)
 	SimSpeedMultiplier = Clamped;
 
 	// If timer is running, restart it with new cadence.
-	if (const UWorld* World = GetGameInstance() ? GetGameInstance()->GetWorld() : nullptr)
+	// Use GameInstance TimerManager for persistence across level transitions.
+	if (UGameInstance* GI = GetGameInstance())
 	{
-		if (World->GetTimerManager().IsTimerActive(FixedStepTimer))
+		if (GI->GetTimerManager().IsTimerActive(FixedStepTimer))
 		{
 			FixedStep_StopTimer();
 			FixedStep_StartTimer();
@@ -135,12 +138,15 @@ void UPraxisOrchestrator::SetInstructorSimSpeedMultiplier(float InMultiplier)
 /**
  * Starts a fixed-step timer for the simulation loop.
  *
- * This function initializes and sets up a repeating timer using the Unreal Engine timer system.
+ * This function initializes and sets up a repeating timer using the GameInstance's timer system.
  * The timer is configured based on the simulation's tick interval (`TickIntervalSeconds`)
  * and an optional simulation speed multiplier (`SimSpeedMultiplier`).
  * It ensures that the simulation loop advances in fixed steps, independent of frame rate or other dynamics.
  *
- * If the simulation is paused or not properly initialized (i.e., no valid world context is found),
+ * Using GameInstance's TimerManager (rather than World's) ensures the timer persists across
+ * level transitions and PIE restarts, which is appropriate for a GameInstanceSubsystem.
+ *
+ * If the simulation is paused or not properly initialized (i.e., no valid GameInstance is found),
  * the timer will not be started.
  *
  * The calculated cadence of the timer is determined by:
@@ -150,7 +156,7 @@ void UPraxisOrchestrator::SetInstructorSimSpeedMultiplier(float InMultiplier)
  * The timer executes the FixedStep_OnTick() method at regular intervals.
  *
  * Preconditions:
- * - The simulation must have a valid world context (retrieved via GetGameInstance()->GetWorld()).
+ * - The simulation must have a valid GameInstance context.
  *
  * Side Effects:
  * - A timer is created and assigned to the FixedStepTimer handle.
@@ -158,44 +164,37 @@ void UPraxisOrchestrator::SetInstructorSimSpeedMultiplier(float InMultiplier)
  */
 void UPraxisOrchestrator::FixedStep_StartTimer()
 {
-	UWorld* World = GetGameInstance() ? GetGameInstance()->GetWorld() : nullptr;
-	if (!World)
+	UGameInstance* GI = GetGameInstance();
+	if (!GI)
 	{
-		UE_LOG(LogTemp, Error, TEXT("FixedStep_StartTimer: No valid world! Timer not started."));
+		UE_LOG(LogPraxisSim, Error, TEXT("FixedStep_StartTimer: No valid GameInstance! Timer not started."));
 		return;
 	}
 
 	const double Cadence = TickIntervalSeconds / FMath::Max(SimSpeedMultiplier, KINDA_SMALL_NUMBER);
-	UE_LOG(LogTemp, Warning, TEXT("FixedStep_StartTimer: cadence=%.3f seconds, looping timer bound to world: %s"),
-		   Cadence, *World->GetName());
+	UE_LOG(LogPraxisSim, Warning, TEXT("FixedStep_StartTimer: cadence=%.3f seconds, timer bound to GameInstance"),
+		   Cadence);
 
-	World->GetTimerManager().SetTimer(
+	GI->GetTimerManager().SetTimer(
 		FixedStepTimer,
 		this,
 		&UPraxisOrchestrator::FixedStep_OnTick,
 		Cadence,
-		true
+		true  // looping
 	);
-
-	if (UWorld* W = GetWorld())
-	{
-		UE_LOG(LogTemp, Warning, TEXT("%s World: %s"), *GetName(), *W->GetName());
-	}
-	
 }
 
 /**
  * Stops the fixed-step timer in the orchestrator.
  *
- * If a valid game instance and world are available, this method clears the timer
- * referenced by FixedStepTimer from the game's timer manager. Typically used to halt
- * the fixed-step simulation loop when it is no longer needed or is being paused/stopped.
+ * Clears the timer from the GameInstance's timer manager. Using GameInstance's TimerManager
+ * ensures proper cleanup that persists across level transitions.
  */
 void UPraxisOrchestrator::FixedStep_StopTimer()
 {
-	if (UWorld* World = GetGameInstance() ? GetGameInstance()->GetWorld() : nullptr)
+	if (UGameInstance* GI = GetGameInstance())
 	{
-		World->GetTimerManager().ClearTimer(FixedStepTimer);
+		GI->GetTimerManager().ClearTimer(FixedStepTimer);
 	}
 }
 
@@ -223,7 +222,7 @@ void UPraxisOrchestrator::FixedStep_OnTick()
 	// Broadcast the fixed-step tick to listeners (Schedule, Inventory, Metrics, UI, etc.)
 	OnSimTick.Broadcast(TickIntervalSeconds, TickCount);
 
-	UE_LOG(LogTemp, Warning, TEXT("OnSimTick.Broadcast() with %d listeners"), OnSimTick.GetAllObjects().Num());
+	UE_LOG(LogPraxisSim, Warning, TEXT("OnSimTick.Broadcast() with %d listeners"), OnSimTick.GetAllObjects().Num());
 
 }
 
@@ -240,22 +239,92 @@ void UPraxisOrchestrator::AdvanceSimClock(double StepSeconds)
 // ───────────────────────────────────────────────────────────────────────────────
 
 /**
+ * Resolves and validates all subsystem dependencies required by the Orchestrator.
  *
+ * Service criticality:
+ * - REQUIRED: Random (deterministic RNG for simulation)
+ * - OPTIONAL: Schedule, Metrics (production/logistics features)
+ * - OPTIONAL: Inventory (world-scoped, may not exist during initialization)
+ *
+ * If critical services are missing, logs an error with remediation steps.
+ * Optional services log warnings when unavailable but don't block startup.
  */
 void UPraxisOrchestrator::ResolveServices()
 {
-	// Locate subsystems. (They may be null if not part of the build yet.)
-	if (UGameInstance* GI = GetGameInstance())
+	UGameInstance* GI = GetGameInstance();
+	if (!GI)
 	{
-		Schedule = GI->GetSubsystem<UPraxisScheduleService>();
-		Metrics  = GI->GetSubsystem<UPraxisMetricsSubsystem>();
-		Random   = GI->GetSubsystem<UPraxisRandomService>();
+		UE_LOG(LogPraxisSim, Error, TEXT("Orchestrator ResolveServices: No GameInstance! Cannot resolve any services."));
+		return;
 	}
 
-	// Inventory is world-scoped
-	if (UWorld* World = GetGameInstance() ? GetGameInstance()->GetWorld() : nullptr)
+	// ── Critical Services (GameInstance-scoped) ──────────────────────────────────
+	Random = GI->GetSubsystem<UPraxisRandomService>();
+	if (!Random)
+	{
+		UE_LOG(LogPraxisSim, Error, 
+			TEXT("Orchestrator ResolveServices: CRITICAL - UPraxisRandomService not found!\n")
+			TEXT("  → Check that PraxisCore module is loaded\n")
+			TEXT("  → Verify UPraxisRandomService is registered as a GameInstanceSubsystem\n")
+			TEXT("  → Simulation will fail without deterministic RNG"));
+	}
+	else
+	{
+		UE_LOG(LogPraxisSim, Log, TEXT("Orchestrator ResolveServices: Random service resolved ✓"));
+	}
+
+	// ── Optional Services (GameInstance-scoped) ──────────────────────────────────
+	Schedule = GI->GetSubsystem<UPraxisScheduleService>();
+	if (!Schedule)
+	{
+		UE_LOG(LogPraxisSim, Warning, 
+			TEXT("Orchestrator ResolveServices: UPraxisScheduleService not found (optional).\n")
+			TEXT("  → Work order scheduling will be unavailable\n")
+			TEXT("  → Check PraxisCore module if this is unexpected"));
+	}
+	else
+	{
+		UE_LOG(LogPraxisSim, Log, TEXT("Orchestrator ResolveServices: Schedule service resolved ✓"));
+	}
+
+	Metrics = GI->GetSubsystem<UPraxisMetricsSubsystem>();
+	if (!Metrics)
+	{
+		UE_LOG(LogPraxisSim, Warning, 
+			TEXT("Orchestrator ResolveServices: UPraxisMetricsSubsystem not found (optional).\n")
+			TEXT("  → Performance metrics and analytics will be unavailable\n")
+			TEXT("  → Check PraxisCore module if this is unexpected"));
+	}
+	else
+	{
+		UE_LOG(LogPraxisSim, Log, TEXT("Orchestrator ResolveServices: Metrics subsystem resolved ✓"));
+	}
+
+	// ── World-scoped Services ────────────────────────────────────────────────────
+	// Inventory is world-scoped and may not exist during early initialization.
+	// We'll try to resolve it but won't error if unavailable yet.
+	if (UWorld* World = GI->GetWorld())
 	{
 		Inventory = World->GetSubsystem<UPraxisInventoryService>();
+		if (!Inventory)
+		{
+			UE_LOG(LogPraxisSim, Warning, 
+				TEXT("Orchestrator ResolveServices: UPraxisInventoryService not found (optional).\n")
+				TEXT("  → Inventory tracking will be unavailable\n")
+				TEXT("  → This is normal if called before world is fully initialized\n")
+				TEXT("  → Check PraxisCore module if this persists after BeginPlay"));
+		}
+		else
+		{
+			UE_LOG(LogPraxisSim, Log, TEXT("Orchestrator ResolveServices: Inventory service resolved ✓"));
+		}
+	}
+	else
+	{
+		UE_LOG(LogPraxisSim, Warning, 
+			TEXT("Orchestrator ResolveServices: No World available yet.\n")
+			TEXT("  → World-scoped subsystems (Inventory) will be unavailable\n")
+			TEXT("  → This is normal during GameInstance initialization"));
 	}
 }
 
@@ -277,7 +346,7 @@ void UPraxisOrchestrator::Initialize(FSubsystemCollectionBase& Collection)
 	// Safe to call here:
 	// Create internal state, schedule delayed startup, bind events
 	// DO NOT call GetWorld(), GetGameInstance(), or other subsystems yet.
-	UE_LOG(LogTemp, Warning, TEXT("Orchestrator subsystem initialized (boot phase)."));
+	UE_LOG(LogPraxisSim, Warning, TEXT("Orchestrator subsystem initialized (boot phase)."));
 
 	// Optionally queue Start() after world creation
 	if (UGameInstance* GI = GetGameInstance())
@@ -292,7 +361,7 @@ void UPraxisOrchestrator::Initialize(FSubsystemCollectionBase& Collection)
 
 void UPraxisOrchestrator::ApplyManifestDefaults()
 {
-	UE_LOG(LogTemp, Warning, TEXT("Orchestrator ApplyManifestDefaults"));
+	UE_LOG(LogPraxisSim, Warning, TEXT("Orchestrator ApplyManifestDefaults"));
 	// In a later pass, pull these from your Scenario Manifest.
 	// For now, keep safe defaults if not set externally.
 
@@ -320,12 +389,12 @@ void UPraxisOrchestrator::ApplyManifestDefaults()
  */
 void UPraxisOrchestrator::BeginSession()
 {
-	UE_LOG(LogTemp, Warning, TEXT("Orchestrator BeginSession: Starting new session."));
+	UE_LOG(LogPraxisSim, Warning, TEXT("Orchestrator BeginSession: Starting new session."));
 
 	// ── Guard: Avoid double start ────────────────────────────────────────────────
 	if (Phase == TEXT("Run"))
 	{
-		UE_LOG(LogTemp, Warning, TEXT("Orchestrator BeginSession called while already running."));
+		UE_LOG(LogPraxisSim, Warning, TEXT("Orchestrator BeginSession called while already running."));
 		return;
 	}
 
@@ -346,18 +415,18 @@ void UPraxisOrchestrator::BeginSession()
 	}
 	else
 	{
-		UE_LOG(LogTemp, Warning, TEXT("Orchestrator BeginSession: Random service not found."));
+		UE_LOG(LogPraxisSim, Error, TEXT("Orchestrator BeginSession: CRITICAL - Random service not available! Simulation cannot proceed deterministically."));
 	}
 
 	if (Schedule)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("Orchestrator BeginSession: Schedule service ready."));
+		UE_LOG(LogPraxisSim, Warning, TEXT("Orchestrator BeginSession: Schedule service ready."));
 		// later: Schedule->ResetActiveOrders();
 	}
 
 	if (Metrics)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("Orchestrator BeginSession: Metrics subsystem ready."));
+		UE_LOG(LogPraxisSim, Warning, TEXT("Orchestrator BeginSession: Metrics subsystem ready."));
 		// later: Metrics->Reset();
 	}
 
@@ -367,7 +436,7 @@ void UPraxisOrchestrator::BeginSession()
 	// ── Start fixed-step simulation loop ─────────────────────────────────────────
 	FixedStep_StartTimer();
 
-	UE_LOG(LogTemp, Warning, TEXT("Orchestrator BeginSession complete. Tick timer started."));
+	UE_LOG(LogPraxisSim, Warning, TEXT("Orchestrator BeginSession complete. Tick timer started."));
 }
 
 
@@ -376,12 +445,12 @@ void UPraxisOrchestrator::BeginSession()
  */
 void UPraxisOrchestrator::EndSession()
 {
-	UE_LOG(LogTemp, Warning, TEXT("Orchestrator EndSession: terminating current simulation session."));
+	UE_LOG(LogPraxisSim, Warning, TEXT("Orchestrator EndSession: terminating current simulation session."));
 
 	// ── Guard: Only end if actually running ──────────────────────────────────────
 	if (Phase != TEXT("Run") && Phase != TEXT("Pause"))
 	{
-		UE_LOG(LogTemp, Warning, TEXT("Orchestrator EndSession called outside of active session (phase: %s)."), *Phase.ToString());
+		UE_LOG(LogPraxisSim, Warning, TEXT("Orchestrator EndSession called outside of active session (phase: %s)."), *Phase.ToString());
 		return;
 	}
 
@@ -392,25 +461,25 @@ void UPraxisOrchestrator::EndSession()
 	if (Random)
 	{
 		// Random->EndTick();      // optional — define if you need tick finalization
-		UE_LOG(LogTemp, Warning, TEXT("Orchestrator EndSession: Random service tick finalized."));
+		UE_LOG(LogPraxisSim, Warning, TEXT("Orchestrator EndSession: Random service tick finalized."));
 	}
 
 	// ── Notify dependent systems ────────────────────────────────────────────────
 	if (Schedule)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("Orchestrator EndSession: Notifying Schedule service."));
+		UE_LOG(LogPraxisSim, Warning, TEXT("Orchestrator EndSession: Notifying Schedule service."));
 		// later: Schedule->FinalizeSession();
 	}
 
 	if (Metrics)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("Orchestrator EndSession: Flushing metrics."));
+		UE_LOG(LogPraxisSim, Warning, TEXT("Orchestrator EndSession: Flushing metrics."));
 		// later: Metrics->FlushSessionData(SimClockUTC);
 	}
 
 	if (Inventory)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("Orchestrator EndSession: Finalizing inventory state."));
+		UE_LOG(LogPraxisSim, Warning, TEXT("Orchestrator EndSession: Finalizing inventory state."));
 		// later: Inventory->CommitFinalState();
 	}
 
@@ -423,18 +492,18 @@ void UPraxisOrchestrator::EndSession()
 
 	OnPhaseChanged.Broadcast(Phase);
 
-	UE_LOG(LogTemp, Warning, TEXT("Orchestrator EndSession complete. Simulation halted at %s after %d ticks."),
+	UE_LOG(LogPraxisSim, Warning, TEXT("Orchestrator EndSession complete. Simulation halted at %s after %d ticks."),
 		   *SimClockUTC.ToString(), TickCount);
 }
 
 
 void UPraxisOrchestrator::Deinitialize()
 {
-	UE_LOG(LogTemp, Warning, TEXT("Orchestrator Deinitialize: shutting down subsystem."));
+	UE_LOG(LogPraxisSim, Warning, TEXT("Orchestrator Deinitialize: shutting down subsystem."));
 
 	// Ensure we end cleanly (stops timer, broadcasts end)
 	EndSession();
 
 	Super::Deinitialize();
-	UE_LOG(LogTemp, Warning, TEXT("Orchestrator deinitialized successfully."));
+	UE_LOG(LogPraxisSim, Warning, TEXT("Orchestrator deinitialized successfully."));
 }

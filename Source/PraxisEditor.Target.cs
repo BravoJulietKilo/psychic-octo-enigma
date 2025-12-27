@@ -16,6 +16,6 @@ public class PraxisEditorTarget : TargetRules
 
 	private void RegisterModulesCreatedByRider()
 	{
-		ExtraModuleNames.AddRange(new string[] { "PraxisAI", "PraxisCore", "PraxisIntegrations", "PraxisMass", "PraxisSimulationKernel", "PraxisTests", "PraxisUI" });
+		ExtraModuleNames.AddRange(new string[] { "PraxisAI", "PraxisCore", "PraxisIntegrations", "PraxisMass", "PraxisSimulationKernel", "PraxisTests", "PraxisUI", "StateTees" });
 	}
 }

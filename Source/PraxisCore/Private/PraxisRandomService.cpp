@@ -1,6 +1,5 @@
 // Copyright 2025 Celsian Pty Ltd
 
-
 #include "PraxisRandomService.h"
 #include "Math/UnrealMathUtility.h"
 
@@ -21,23 +20,24 @@ void UPraxisRandomService::Initialise(int32 InBaseSeed)
 	BaseSeed = InBaseSeed;
 	TickCount = 0;
 	Stateful.Initialize(BaseSeed);
+	UE_LOG(LogPraxisSim, Log, TEXT("PraxisRandomService initialized with seed: %d"), BaseSeed);
 }
 
 int32 UPraxisRandomService::GenerateRandomInt(int32 Min, int32 Max)
 {
-	return Stream.RandRange(Min, Max);
+	return Stateful.RandRange(Min, Max);
 }
 
 float UPraxisRandomService::GenerateUniformProbability(float Min, float Max)
 {
-	const float U = Stream.FRand(); // deterministic
+	const float U = Stateful.FRand(); // deterministic
 	return FMath::Lerp(Min, Max, U);
 }
 
 double UPraxisRandomService::SampleExponential(double Lambda)
 {
 	check(Lambda > 0.0);
-	const float U = FMath::Clamp(Stream.FRand(), KINDA_SMALL_NUMBER, 1.0f - KINDA_SMALL_NUMBER);
+	const float U = FMath::Clamp(Stateful.FRand(), KINDA_SMALL_NUMBER, 1.0f - KINDA_SMALL_NUMBER);
 	return -FMath::Loge(U) / Lambda;
 }
 
@@ -53,13 +53,27 @@ bool UPraxisRandomService::EventOccursInStep(float Lambda, float DeltaT)
 	if (Lambda <= 0.0f || DeltaT <= 0.0f) return false;
 
 	const double p = 1.0 - FMath::Exp(-Lambda * DeltaT);
-	const float U = Stream.FRand();
+	const float U = Stateful.FRand();
 	return U < p;
 }
 
 float UPraxisRandomService::GenerateExponentialProbability(float a, float b)
 {
+	UE_LOG(LogPraxisSim, Warning, TEXT("GenerateExponentialProbability called - this is deprecated. Use ExponentialFromMean_Key instead."));
 	return 1.0f;
+}
+
+float UPraxisRandomService::GetUniformFloat(float X, float X1)
+{
+	const float U = Stateful.FRand();
+	return FMath::Lerp(X, X1, U);
+}
+
+float UPraxisRandomService::GetExponential(float MeanJamDuration)
+{
+	check(MeanJamDuration > 0.0f);
+	const double Lambda = 1.0 / MeanJamDuration;
+	return static_cast<float>(SampleExponential(Lambda));
 }
 
 
@@ -96,8 +110,11 @@ float UPraxisRandomService::Uniform_Key(const FName& Key, int32 Channel, float M
 
 double UPraxisRandomService::SampleExponential(FRandomStream& Rng, double Lambda)
 {
+	// Clamp to avoid log(0) and maintain proper tail behavior.
+	// Upper bound of 0.9999999 instead of (1.0 - KINDA_SMALL_NUMBER) reduces bias
+	// while still preventing log(0) and numerical issues.
 	check(Lambda > 0.0);
-	const float U = FMath::Clamp(Rng.FRand(), KINDA_SMALL_NUMBER, 1.0f - KINDA_SMALL_NUMBER);
+	const float U = FMath::Clamp(Rng.FRand(), KINDA_SMALL_NUMBER, 0.9999999f);
 	return -FMath::Loge(U) / Lambda;
 }
 

@@ -13,7 +13,6 @@
 #pragma once
 
 #include "CoreMinimal.h"
-// #include "PraxisSimulationKernel/Public/PraxisSimulationKernel.h"
 #include "Subsystems/GameInstanceSubsystem.h"
 #include "PraxisOrchestrator.generated.h"
 
@@ -117,11 +116,27 @@ private:
 	TObjectPtr<class UPraxisRandomService> Random = nullptr;
 	
 private:
-	// Config from manifest
-	float     TickIntervalSeconds = 5.f;  // fixed DES step (immutable for students)
-	FDateTime CourseStartUTC;             // default course start; applied to SimClockUTC on Start
+	// ── Config from manifest (or defaults) ──────────────────────────────────────
+	
+	/** Fixed DES step in seconds (immutable for students). */
+	float TickIntervalSeconds = 5.f;
+	
+	/** 
+	 * Default course start time; applied to SimClockUTC on Start().
+	 * If not set externally (via manifest), uses a reproducible default.
+	 * Set to zero to use system time (FDateTime::UtcNow()) for non-deterministic sessions.
+	 */
+	FDateTime CourseStartUTC;
+	
+	/**
+	 * If true, uses system time (FDateTime::UtcNow()) when CourseStartUTC is uninitialized.
+	 * If false, uses fixed default date for reproducible lab scenarios.
+	 * This is a dev/debug flag; production manifests should always specify CourseStartUTC explicitly.
+	 */
+	UPROPERTY(EditAnywhere, Category="Praxis|Orchestrator|Debug")
+	bool bUseSystemTimeForUnsetCourseStart = false;
 
-	// Runtime state
+	// ── Runtime state ────────────────────────────────────────────────────────────
 	FTimerHandle FixedStepTimer;
 	float     SimSpeedMultiplier = 1.f;   // instructor-only time accel (1× default)
 	int32     TickCount = 0;

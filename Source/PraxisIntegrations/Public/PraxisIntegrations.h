@@ -3,7 +3,10 @@
 #include "CoreMinimal.h"
 #include "Modules/ModuleManager.h"
 
-class FPraxisIntegrationsModule : public IModuleInterface
+// Declare the logging category
+DECLARE_LOG_CATEGORY_EXTERN(LogPraxisSim, Log, All); 
+
+class PRAXISINTEGRATIONS_API FPraxisIntegrationsModule : public IModuleInterface
 {
 public:
     virtual void StartupModule() override;

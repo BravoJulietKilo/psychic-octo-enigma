@@ -5,6 +5,8 @@
 #include "PraxisMachine.h"
 #include "Components/StaticMeshComponent.h"
 #include "PraxisSimulationKernel/Public/PraxisSimulationKernel.h"
+#include "Components/StaticMeshComponent.h"
+#include "Components/MachineLogicComponent.h"
 #include "PraxisSimulationKernel/Public/Components/MachineLogicComponent.h"
 
 // Sets default values

@@ -3,6 +3,9 @@
 #include "CoreMinimal.h"
 #include "Modules/ModuleManager.h"
 
+// Declare the logging category
+DECLARE_LOG_CATEGORY_EXTERN(LogPraxisSim, Log, All);
+
 class FPraxisTestsModule : public IModuleInterface
 {
 public:

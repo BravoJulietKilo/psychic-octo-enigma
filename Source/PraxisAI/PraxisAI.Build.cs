@@ -16,10 +16,7 @@ public class PraxisAI : ModuleRules
         PrivateDependencyModuleNames.AddRange(
             new string[]
             {
-                "CoreUObject",
-                "Engine",
-                "Slate",
-                "SlateCore"
+
             }
         );
     }

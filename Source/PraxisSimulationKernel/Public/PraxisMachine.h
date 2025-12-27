@@ -4,9 +4,12 @@
 
 #pragma once
 
+// Forward declarations:
+class UStaticMeshComponent;
+class UMachineLogicComponent;
+
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
-#include "PraxisSimulationKernel/Public/PraxisSimulationKernel.h"
 #include "PraxisMachine.generated.h"
 
 class UMachineLogicComponent;

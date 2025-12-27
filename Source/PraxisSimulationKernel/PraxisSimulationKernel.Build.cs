@@ -1,4 +1,4 @@
-﻿using UnrealBuildTool;
+using UnrealBuildTool;
 
 public class PraxisSimulationKernel : ModuleRules
 {
@@ -9,7 +9,12 @@ public class PraxisSimulationKernel : ModuleRules
         PublicDependencyModuleNames.AddRange(
             new string[]
             {
-                "Core", "AIModule", "PraxisCore"
+                "Core",
+                "AIModule",
+                "PraxisCore",
+                "StateTreeModule",          // Core StateTree types
+                "GameplayStateTreeModule",  // UStateTreeComponent
+                "GameplayTags"
             }
         );
 
@@ -17,9 +22,7 @@ public class PraxisSimulationKernel : ModuleRules
             new string[]
             {
                 "CoreUObject",
-                "Engine",
-                "Slate",
-                "SlateCore"
+                "Engine"
             }
         );
     }

@@ -4,19 +4,19 @@
 // Persists, logs, or streams them to UI or external analytics sinks
 
 #include "PraxisMetricsSubsystem.h"
-//#include "PraxisSimulationKernel.h" // for LogPraxisSim
+#include "PraxisCore.h"  // for LogPraxisSim
 #include "Misc/DateTime.h"
 
 void UPraxisMetricsSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
-    UE_LOG(LogTemp, Log, TEXT("Metrics subsystem initialized."));
+    UE_LOG(LogPraxisSim, Log, TEXT("Metrics subsystem initialized."));
     MetricBuffer.Reserve(256); // reserve for efficiency
 }
 
 void UPraxisMetricsSubsystem::Deinitialize()
 {
-    UE_LOG(LogTemp, Log, TEXT("Metrics subsystem deinitializing. Flushing %d events."), MetricBuffer.Num());
+    UE_LOG(LogPraxisSim, Log, TEXT("Metrics subsystem deinitializing. Flushing %d events."), MetricBuffer.Num());
     FlushMetrics();
     MetricBuffer.Empty();
     Super::Deinitialize();
@@ -28,7 +28,7 @@ void UPraxisMetricsSubsystem::Deinitialize()
 
 void UPraxisMetricsSubsystem::RecordMachineEvent(FName MachineId, const FString& EventType, const FDateTime& Timestamp)
 {
-    UE_LOG(LogTemp, Verbose, TEXT("[Metrics] %s event '%s' at %s"), *MachineId.ToString(), *EventType, *Timestamp.ToString());
+    UE_LOG(LogPraxisSim, Verbose, TEXT("[Metrics] %s event '%s' at %s"), *MachineId.ToString(), *EventType, *Timestamp.ToString());
     FPraxisMetricEvent Event;
     Event.SourceId = MachineId;
     Event.EventType = EventType;
@@ -40,21 +40,21 @@ void UPraxisMetricsSubsystem::RecordProduction(FName MachineId, double Units, in
 {
     FString EventType = FString::Printf(TEXT("ProductionTick_%d"), TickCount);
     AddEvent(MachineId, EventType, Units);
-    UE_LOG(LogTemp, Verbose, TEXT("[Metrics] %s produced %.2f units (tick %d)"), *MachineId.ToString(), Units, TickCount);
+    UE_LOG(LogPraxisSim, Verbose, TEXT("[Metrics] %s produced %.2f units (tick %d)"), *MachineId.ToString(), Units, TickCount);
 }
 
 void UPraxisMetricsSubsystem::FlushMetrics()
 {
     if (MetricBuffer.IsEmpty())
     {
-        UE_LOG(LogTemp, Log, TEXT("Metrics flush skipped (buffer empty)."));
+        UE_LOG(LogPraxisSim, Log, TEXT("Metrics flush skipped (buffer empty)."));
         return;
     }
 
     // In future: persist to CSV, DB, or analytics stream
     for (const FPraxisMetricEvent& E : MetricBuffer)
     {
-        UE_LOG(LogTemp, Log, TEXT("[Metrics] %s | %s | %.2f | %s"),
+        UE_LOG(LogPraxisSim, Log, TEXT("[Metrics] %s | %s | %.2f | %s"),
             *E.SourceId.ToString(), *E.EventType, E.Value, *E.TimestampUTC.ToString());
     }
 

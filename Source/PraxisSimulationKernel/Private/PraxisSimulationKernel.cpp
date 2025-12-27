@@ -1,7 +1,5 @@
 ﻿#include "PraxisSimulationKernel.h"
 
-DEFINE_LOG_CATEGORY(LogPraxisSim);
-
 #define LOCTEXT_NAMESPACE "FPraxisSimulationKernelModule"
 
 void FPraxisSimulationKernelModule::StartupModule()

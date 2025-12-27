@@ -1,15 +1,17 @@
 ﻿using UnrealBuildTool;
 
-public class PraxisCore : ModuleRules
+public class StateTees : ModuleRules
 {
-    public PraxisCore(ReadOnlyTargetRules Target) : base(Target)
+    public StateTees(ReadOnlyTargetRules Target) : base(Target)
     {
         PCHUsage = ModuleRules.PCHUsageMode.UseExplicitOrSharedPCHs;
 
         PublicDependencyModuleNames.AddRange(
             new string[]
             {
-                "Core"
+                "Core", 
+                "AIModule", 
+                "PraxisCore"
             }
         );
 
@@ -18,13 +20,6 @@ public class PraxisCore : ModuleRules
             {
                 "CoreUObject",
                 "Engine"
-            }
-        );
-        
-        PublicIncludePathModuleNames.AddRange(
-            new string[]
-            {
-                
             }
         );
     }
