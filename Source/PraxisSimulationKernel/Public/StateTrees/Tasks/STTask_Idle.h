@@ -30,7 +30,7 @@ struct FSTTask_IdleInstanceData
  * 
  * This is the default/rest state for a machine.
  */
-USTRUCT(Category = "Praxis", DisplayName = "Idle")
+USTRUCT(BlueprintType, meta = (Category = "Praxis", DisplayName = "Idle"))
 struct PRAXISSIMULATIONKERNEL_API FSTTask_Idle : public FStateTreeTaskBase
 {
 	GENERATED_BODY()

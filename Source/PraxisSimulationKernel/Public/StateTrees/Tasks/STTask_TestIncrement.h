@@ -30,7 +30,7 @@ struct FSTTask_TestIncrementInstanceData
  * 
  * Once this works, we know the foundation is solid for real tasks.
  */
-USTRUCT(Category = "Praxis", DisplayName = "Test Increment Counter")
+USTRUCT(BlueprintType, meta = (Category = "Praxis", DisplayName = "Test Increment Counter"))
 struct PRAXISSIMULATIONKERNEL_API FSTTask_TestIncrement : public FStateTreeTaskBase
 {
 	GENERATED_BODY()
