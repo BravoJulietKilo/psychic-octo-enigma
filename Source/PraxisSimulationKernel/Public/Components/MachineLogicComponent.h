@@ -21,7 +21,7 @@ class UMachineContextComponent;
  * Creates a MachineContextComponent that StateTree tasks can bind to for state access.
  * Ticks the StateTree in response to simulation ticks from Orchestrator.
  */
-UCLASS(ClassGroup=(Praxis), meta=(BlueprintSpawnableComponent))
+UCLASS(Blueprintable, BlueprintType, ClassGroup=(Praxis), meta=(BlueprintSpawnableComponent))
 class PRAXISSIMULATIONKERNEL_API UMachineLogicComponent : public UActorComponent
 {
 	GENERATED_BODY()

@@ -25,5 +25,16 @@ public class PraxisSimulationKernel : ModuleRules
                 "Engine"
             }
         );
+
+        // Editor-only dependencies
+        if (Target.Type == TargetType.Editor)
+        {
+            PrivateDependencyModuleNames.AddRange(
+                new string[]
+                {
+                    "StateTreeEditorModule"  // Needed for tasks to appear in editor
+                }
+            );
+        }
     }
 }

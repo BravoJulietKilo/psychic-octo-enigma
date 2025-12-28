@@ -4,6 +4,7 @@
 #include "Components/MachineContextComponent.h"
 #include "StateTreeExecutionContext.h"
 #include "PraxisSimulationKernel.h"
+#include "GameFramework/Actor.h"
 
 EStateTreeRunStatus FSTTask_TestIncrement::EnterState(
 	FStateTreeExecutionContext& Context, 
@@ -12,10 +13,19 @@ EStateTreeRunStatus FSTTask_TestIncrement::EnterState(
 	// Get instance data (contains our bound component reference)
 	FSTTask_TestIncrementInstanceData& InstanceData = Context.GetInstanceData(*this);
 	
-	// Verify binding
+	// If not bound, try to find it on the owner actor
 	if (!InstanceData.MachineContext)
 	{
-		UE_LOG(LogPraxisSim, Error, TEXT("[TestIncrement] MachineContext not bound!"));
+		if (AActor* Owner = Cast<AActor>(Context.GetOwner()))
+		{
+			InstanceData.MachineContext = Owner->FindComponentByClass<UMachineContextComponent>();
+		}
+	}
+	
+	// Verify we have the component (either from binding or from finding it)
+	if (!InstanceData.MachineContext)
+	{
+		UE_LOG(LogPraxisSim, Error, TEXT("[TestIncrement] MachineContext not found on owner actor!"));
 		return EStateTreeRunStatus::Failed;
 	}
 	

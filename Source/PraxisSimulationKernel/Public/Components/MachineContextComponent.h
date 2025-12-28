@@ -16,7 +16,7 @@
  * - Bind task instance data to "Actor > Machine Context Component > Context"
  * - Tasks can then read/modify any property in FPraxisMachineContext
  */
-UCLASS(ClassGroup=(Praxis), meta=(BlueprintSpawnableComponent))
+UCLASS(Blueprintable, BlueprintType, ClassGroup=(Praxis), meta=(BlueprintSpawnableComponent))
 class PRAXISSIMULATIONKERNEL_API UMachineContextComponent : public UActorComponent
 {
 	GENERATED_BODY()
