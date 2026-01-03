@@ -24,6 +24,8 @@ UMachineLogicComponent::UMachineLogicComponent()
 // Lifecycle
 // ════════════════════════════════════════════════════════════════════════════════
 
+
+
 void UMachineLogicComponent::OnRegister()
 {
 	Super::OnRegister();
@@ -52,8 +54,37 @@ void UMachineLogicComponent::OnRegister()
 		}
 	}
 	
-	// Create StateTree component
+	// Check if StateTreeComponent already exists (could be from level/blueprint)
 	if (!StateTreeComponent)
+	{
+		// Try to find existing StateTreeComponent in owner
+		TArray<UStateTreeComponent*> ExistingComponents;
+		GetOwner()->GetComponents<UStateTreeComponent>(ExistingComponents);
+		
+		if (ExistingComponents.Num() > 0)
+		{
+			// Use the first one we find
+			StateTreeComponent = ExistingComponents[0];
+			UE_LOG(LogPraxisSim, Log, 
+				TEXT("[%s] Using existing StateTreeComponent from owner"), 
+				*MachineId.ToString());
+			
+			// If the existing component doesn't have a StateTree set, set it from our ref
+			if (StateTreeRef.GetStateTree() != nullptr)
+			{
+				StateTreeComponent->SetStateTree(const_cast<UStateTree*>(StateTreeRef.GetStateTree()));
+				StateTreeComponent->SetStartLogicAutomatically(false);
+				StateTreeComponent->SetComponentTickEnabled(false);
+				UE_LOG(LogPraxisSim, Log, 
+					TEXT("[%s] Set StateTree on existing component"), 
+					*MachineId.ToString());
+			}
+			return; // Exit early since we found an existing component
+		}
+	}
+	
+	// Create StateTree component ONLY if we don't have one and have a valid StateTree asset
+	if (!StateTreeComponent && StateTreeRef.GetStateTree() != nullptr)
 	{
 		StateTreeComponent = NewObject<UStateTreeComponent>(
 			GetOwner(), 
@@ -63,9 +94,6 @@ void UMachineLogicComponent::OnRegister()
 		
 		if (StateTreeComponent)
 		{
-			// Pass the asset pointer directly to the component
-			StateTreeComponent->SetStateTree(const_cast<UStateTree*>(StateTreeRef.GetStateTree()));
-			
 			// Disable automatic start - we'll control it manually
 			StateTreeComponent->SetStartLogicAutomatically(false);
 			
@@ -76,9 +104,15 @@ void UMachineLogicComponent::OnRegister()
 			StateTreeComponent->SetComponentTickEnabled(false);
 			
 			UE_LOG(LogPraxisSim, Verbose, 
-				TEXT("[%s] StateTree component created"), 
+				TEXT("[%s] StateTree component created (asset will be set in BeginPlay)"), 
 				*MachineId.ToString());
 		}
+	}
+	else if (!StateTreeComponent)
+	{
+		UE_LOG(LogPraxisSim, Warning, 
+			TEXT("[%s] MachineLogicComponent: StateTreeRef not set, StateTree component will not be created"), 
+			*MachineId.ToString());
 	}
 }
 
@@ -113,19 +147,32 @@ void UMachineLogicComponent::BeginPlay()
 	// Initialize machine context
 	InitializeMachineContext();
 	
-	// Start the StateTree
+	// Assign StateTree asset to component (now that Blueprint properties are initialized)
 	if (StateTreeComponent && StateTreeComponent->IsRegistered())
 	{
-		StateTreeComponent->StartLogic();
+		// Get the StateTree asset from the Blueprint property
+		UStateTree* TreeAsset = const_cast<UStateTree*>(StateTreeRef.GetStateTree());
 		
-		UE_LOG(LogPraxisSim, Log, 
-			TEXT("[%s] MachineLogicComponent initialized and StateTree started"), 
-			*MachineId.ToString());
+		if (TreeAsset)
+		{
+			StateTreeComponent->SetStateTree(TreeAsset);
+			StateTreeComponent->StartLogic();
+			
+			UE_LOG(LogPraxisSim, Log, 
+				TEXT("[%s] MachineLogicComponent initialized and StateTree started"), 
+				*MachineId.ToString());
+		}
+		else
+		{
+			UE_LOG(LogPraxisSim, Error, 
+				TEXT("[%s] StateTree asset not assigned in Blueprint! Set 'State Tree Ref' property."), 
+				*MachineId.ToString());
+		}
 	}
 	else
 	{
 		UE_LOG(LogPraxisSim, Warning, 
-			TEXT("[%s] MachineLogicComponent initialized WITHOUT StateTree"), 
+			TEXT("[%s] MachineLogicComponent initialized WITHOUT StateTree component"), 
 			*MachineId.ToString());
 	}
 }
