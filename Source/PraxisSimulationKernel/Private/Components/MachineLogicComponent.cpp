@@ -6,6 +6,7 @@
 #include "PraxisOrchestrator.h"
 #include "PraxisRandomService.h"
 #include "PraxisMetricsSubsystem.h"
+#include "PraxisScheduleService.h"
 #include "StateTree.h"
 #include "Components/StateTreeComponent.h"
 #include "Engine/World.h"
@@ -143,6 +144,18 @@ void UMachineLogicComponent::BeginPlay()
 	// Subscribe to orchestrator events
 	Orchestrator->OnSimTick.AddDynamic(this, &UMachineLogicComponent::HandleSimTick);
 	Orchestrator->OnEndSession.AddDynamic(this, &UMachineLogicComponent::HandleEndSession);
+	
+	// Register with schedule service
+	if (UGameInstance* GI = GetWorld()->GetGameInstance())
+	{
+		if (UPraxisScheduleService* ScheduleService = GI->GetSubsystem<UPraxisScheduleService>())
+		{
+			ScheduleService->RegisterMachine(MachineId);
+			UE_LOG(LogPraxisSim, Log, 
+				TEXT("[%s] Registered with schedule service"), 
+				*MachineId.ToString());
+		}
+	}
 
 	// Initialize machine context
 	InitializeMachineContext();

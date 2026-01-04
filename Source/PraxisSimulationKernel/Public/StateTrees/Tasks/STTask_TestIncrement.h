@@ -17,7 +17,7 @@ struct FSTTask_TestIncrementInstanceData
 {
 	GENERATED_BODY()
 
-	/** Reference to the machine context component (bound in StateTree editor) */
+	/** Reference to the machine context component (auto-discovered at runtime) */
 	UPROPERTY(EditAnywhere, Category = "Input", meta = (Optional))
 	TObjectPtr<UMachineContextComponent> MachineContext = nullptr;
 };
@@ -30,7 +30,7 @@ struct FSTTask_TestIncrementInstanceData
  * 
  * Once this works, we know the foundation is solid for real tasks.
  */
-USTRUCT(BlueprintType, meta = (Category = "Praxis", DisplayName = "Test Increment Counter"))
+USTRUCT(Category = "Praxis", DisplayName = "Test Increment Counter", meta = (Hidden))
 struct PRAXISSIMULATIONKERNEL_API FSTTask_TestIncrement : public FStateTreeTaskBase
 {
 	GENERATED_BODY()

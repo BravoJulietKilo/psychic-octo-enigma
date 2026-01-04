@@ -3,12 +3,11 @@
 #include "StateTreeTaskBase.h"
 #include "StateTreeConditionBase.h"
 #include "StateTreeEvaluatorBase.h"
-#include "GameFramework/Actor.h"
 
 UPraxisStateTreeSchema::UPraxisStateTreeSchema()
 {
-	// UStateTreeSchema doesn't have a ContextActorClass property
-	// The schema compatibility is determined by the StateTree asset itself
+	// Set default context data requirements if needed
+	// ContextDataDescs can be configured here
 }
 
 bool UPraxisStateTreeSchema::IsStructAllowed(const UScriptStruct* InStruct) const
