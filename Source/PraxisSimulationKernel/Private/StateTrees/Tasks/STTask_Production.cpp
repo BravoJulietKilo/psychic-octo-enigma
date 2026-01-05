@@ -2,6 +2,7 @@
 
 #include "StateTrees/Tasks/STTask_Production.h"
 #include "Components/MachineContextComponent.h"
+#include "Components/MachineLogicComponent.h"
 #include "PraxisRandomService.h"
 #include "StateTreeExecutionContext.h"
 #include "PraxisSimulationKernel.h"
@@ -132,6 +133,15 @@ EStateTreeRunStatus FSTTask_Production::Tick(
 		MachineCtx.bHasActiveWorkOrder = false;
 		MachineCtx.CurrentSKU.Empty();
 		MachineCtx.TargetQuantity = 0;
+		
+		// Notify the MachineLogicComponent so it can tell the schedule service
+		if (AActor* Owner = Cast<AActor>(Context.GetOwner()))
+		{
+			if (UMachineLogicComponent* LogicComp = Owner->FindComponentByClass<UMachineLogicComponent>())
+			{
+				LogicComp->NotifyWorkOrderComplete();
+			}
+		}
 		
 		// Work order complete - transition to Idle
 		return EStateTreeRunStatus::Succeeded;

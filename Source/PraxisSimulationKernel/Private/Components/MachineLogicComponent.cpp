@@ -349,3 +349,25 @@ bool UMachineLogicComponent::IsProcessing() const
 	
 	return false;
 }
+
+void UMachineLogicComponent::NotifyWorkOrderComplete()
+{
+	// Notify the schedule service that this work order is done
+	// so it can assign the next one
+	if (UWorld* World = GetWorld())
+	{
+		if (UGameInstance* GI = World->GetGameInstance())
+		{
+			if (UPraxisScheduleService* ScheduleService = GI->GetSubsystem<UPraxisScheduleService>())
+			{
+				// For now we don't track WorkOrderID in the machine context
+				// Just notify that the machine is idle and ready for more work
+				ScheduleService->NotifyMachineIdle(MachineId);
+				
+				UE_LOG(LogPraxisSim, Verbose, 
+					TEXT("[%s] Notified schedule service of work completion"), 
+					*MachineId.ToString());
+			}
+		}
+	}
+}

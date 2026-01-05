@@ -52,6 +52,9 @@ public:
 	/** Get the machine context component */
 	UFUNCTION(BlueprintPure, Category = "Machine")
 	UMachineContextComponent* GetMachineContextComponent() const { return MachineContextComponent; }
+	
+	/** Notify that the current work order has completed (called by StateTree tasks) */
+	void NotifyWorkOrderComplete();
 
 protected:
 	// ═══════════════════════════════════════════════════════════════════════════
