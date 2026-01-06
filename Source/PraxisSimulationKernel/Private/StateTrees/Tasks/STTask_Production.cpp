@@ -4,6 +4,7 @@
 #include "Components/MachineContextComponent.h"
 #include "Components/MachineLogicComponent.h"
 #include "PraxisRandomService.h"
+#include "PraxisMetricsSubsystem.h"
 #include "StateTreeExecutionContext.h"
 #include "PraxisSimulationKernel.h"
 #include "GameFramework/Actor.h"
@@ -36,6 +37,7 @@ EStateTreeRunStatus FSTTask_Production::EnterState(
 				if (UGameInstance* GI = World->GetGameInstance())
 				{
 					InstanceData.RandomService = GI->GetSubsystem<UPraxisRandomService>();
+					InstanceData.Metrics = GI->GetSubsystem<UPraxisMetricsSubsystem>();
 				}
 			}
 		}
@@ -58,6 +60,31 @@ EStateTreeRunStatus FSTTask_Production::EnterState(
 	
 	// Reset time in state
 	MachineCtx.TimeInState = 0.0f;
+	
+	// Report state change to metrics
+	if (InstanceData.Metrics && !InstanceData.PreviousState.IsEmpty())
+	{
+		// Get MachineId from owner's LogicComponent
+		FName ReportMachineId = MachineCtx.MachineId;
+		if (ReportMachineId == NAME_None)
+		{
+			if (AActor* Owner = Cast<AActor>(Context.GetOwner()))
+			{
+				if (UMachineLogicComponent* LogicComp = Owner->FindComponentByClass<UMachineLogicComponent>())
+				{
+					ReportMachineId = LogicComp->MachineId;
+				}
+			}
+		}
+		
+		InstanceData.Metrics->RecordStateChange(
+			ReportMachineId,
+			InstanceData.PreviousState,
+			TEXT("Production"),
+			FDateTime::UtcNow()
+		);
+	}
+	InstanceData.PreviousState = TEXT("Production");
 	
 	UE_LOG(LogPraxisSim, Log, 
 		TEXT("[%s] Production started - Target: %d units of %s"), 
@@ -100,6 +127,30 @@ EStateTreeRunStatus FSTTask_Production::Tick(
 		{
 			MachineCtx.ScrapCounter++;
 			
+			// Report scrap to metrics
+			if (InstanceData.Metrics)
+			{
+				// Get MachineId from owner's LogicComponent for accurate reporting
+				FName ReportMachineId = MachineCtx.MachineId;
+				if (ReportMachineId == NAME_None)
+				{
+					if (AActor* Owner = Cast<AActor>(Context.GetOwner()))
+					{
+						if (UMachineLogicComponent* LogicComp = Owner->FindComponentByClass<UMachineLogicComponent>())
+						{
+							ReportMachineId = LogicComp->MachineId;
+						}
+					}
+				}
+				
+				InstanceData.Metrics->RecordScrap(
+					ReportMachineId,
+					1,
+					MachineCtx.CurrentSKU,
+					FDateTime::UtcNow()
+				);
+			}
+			
 			UE_LOG(LogPraxisSim, Verbose, 
 				TEXT("[%s] Produced SCRAP unit (%d/%d good, %d scrap)"), 
 				*MachineCtx.MachineId.ToString(),
@@ -110,6 +161,30 @@ EStateTreeRunStatus FSTTask_Production::Tick(
 		else
 		{
 			MachineCtx.OutputCounter++;
+			
+			// Report good production to metrics
+			if (InstanceData.Metrics)
+			{
+				// Get MachineId from owner's LogicComponent for accurate reporting
+				FName ReportMachineId = MachineCtx.MachineId;
+				if (ReportMachineId == NAME_None)
+				{
+					if (AActor* Owner = Cast<AActor>(Context.GetOwner()))
+					{
+						if (UMachineLogicComponent* LogicComp = Owner->FindComponentByClass<UMachineLogicComponent>())
+						{
+							ReportMachineId = LogicComp->MachineId;
+						}
+					}
+				}
+				
+				InstanceData.Metrics->RecordGoodProduction(
+					ReportMachineId,
+					1,
+					MachineCtx.CurrentSKU,
+					FDateTime::UtcNow()
+				);
+			}
 			
 			UE_LOG(LogPraxisSim, Verbose, 
 				TEXT("[%s] Produced GOOD unit (%d/%d good, %d scrap)"), 

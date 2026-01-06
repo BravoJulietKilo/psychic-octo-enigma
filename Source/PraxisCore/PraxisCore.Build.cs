@@ -9,7 +9,10 @@ public class PraxisCore : ModuleRules
         PublicDependencyModuleNames.AddRange(
             new string[]
             {
-                "Core"
+                "Core",
+                "MassEntity",
+                "MassCommon",
+                "StructUtils"
             }
         );
 
@@ -17,7 +20,8 @@ public class PraxisCore : ModuleRules
             new string[]
             {
                 "CoreUObject",
-                "Engine"
+                "Engine",
+                "PraxisMass"
             }
         );
         

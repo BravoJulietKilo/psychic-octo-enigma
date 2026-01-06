@@ -20,6 +20,13 @@ struct FSTTask_IdleInstanceData
 	/** Reference to the machine context component (auto-discovered at runtime) */
 	UPROPERTY(EditAnywhere, Category = "Input", meta = (Optional))
 	TObjectPtr<UMachineContextComponent> MachineContext = nullptr;
+	
+	/** Reference to metrics subsystem */
+	UPROPERTY(EditAnywhere, Category = "Input", meta = (Optional))
+	TObjectPtr<class UPraxisMetricsSubsystem> Metrics = nullptr;
+	
+	/** Track previous state for reporting state changes */
+	FString PreviousState;
 };
 
 /**

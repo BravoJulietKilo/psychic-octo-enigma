@@ -2,9 +2,13 @@
 
 #include "StateTrees/Tasks/STTask_Idle.h"
 #include "Components/MachineContextComponent.h"
+#include "Components/MachineLogicComponent.h"
+#include "PraxisMetricsSubsystem.h"
 #include "StateTreeExecutionContext.h"
 #include "PraxisSimulationKernel.h"
 #include "GameFramework/Actor.h"
+#include "Engine/World.h"
+#include "Engine/GameInstance.h"
 
 EStateTreeRunStatus FSTTask_Idle::EnterState(
 	FStateTreeExecutionContext& Context, 
@@ -13,12 +17,20 @@ EStateTreeRunStatus FSTTask_Idle::EnterState(
 	// Get instance data
 	FSTTask_IdleInstanceData& InstanceData = Context.GetInstanceData(*this);
 	
-	// Auto-discover component if not bound
+	// Auto-discover components if not bound
 	if (!InstanceData.MachineContext)
 	{
 		if (AActor* Owner = Cast<AActor>(Context.GetOwner()))
 		{
 			InstanceData.MachineContext = Owner->FindComponentByClass<UMachineContextComponent>();
+			
+			if (UWorld* World = Owner->GetWorld())
+			{
+				if (UGameInstance* GI = World->GetGameInstance())
+				{
+					InstanceData.Metrics = GI->GetSubsystem<UPraxisMetricsSubsystem>();
+				}
+			}
 		}
 	}
 	
@@ -34,6 +46,31 @@ EStateTreeRunStatus FSTTask_Idle::EnterState(
 	
 	// Reset time in state
 	MachineCtx.TimeInState = 0.0f;
+	
+	// Report state change to metrics
+	if (InstanceData.Metrics && !InstanceData.PreviousState.IsEmpty())
+	{
+		// Get MachineId from owner's LogicComponent
+		FName ReportMachineId = MachineCtx.MachineId;
+		if (ReportMachineId == NAME_None)
+		{
+			if (AActor* Owner = Cast<AActor>(Context.GetOwner()))
+			{
+				if (UMachineLogicComponent* LogicComp = Owner->FindComponentByClass<UMachineLogicComponent>())
+				{
+					ReportMachineId = LogicComp->MachineId;
+				}
+			}
+		}
+		
+		InstanceData.Metrics->RecordStateChange(
+			ReportMachineId,
+			InstanceData.PreviousState,
+			TEXT("Idle"),
+			FDateTime::UtcNow()
+		);
+	}
+	InstanceData.PreviousState = TEXT("Idle");
 	
 	UE_LOG(LogPraxisSim, Log, 
 		TEXT("[%s] Entered Idle state"), 

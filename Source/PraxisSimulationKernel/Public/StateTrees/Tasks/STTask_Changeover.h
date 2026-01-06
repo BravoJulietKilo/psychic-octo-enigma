@@ -21,6 +21,14 @@ struct FSTTask_ChangeoverInstanceData
 	/** Reference to the machine context component (auto-discovered at runtime) */
 	UPROPERTY(EditAnywhere, Category = "Input", meta = (Optional))
 	TObjectPtr<UMachineContextComponent> MachineContext = nullptr;
+	
+	/** Reference to metrics subsystem */
+	UPROPERTY(EditAnywhere, Category = "Input", meta = (Optional))
+	TObjectPtr<class UPraxisMetricsSubsystem> Metrics = nullptr;
+	
+	/** Track previous state and SKU for reporting */
+	FString PreviousState;
+	FString PreviousSKU;
 };
 
 /**

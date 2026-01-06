@@ -26,6 +26,13 @@ struct FSTTask_ProductionInstanceData
 	/** Reference to the random service (for scrap determination) */
 	UPROPERTY(EditAnywhere, Category = "Input", meta = (Optional))
 	TObjectPtr<UPraxisRandomService> RandomService = nullptr;
+	
+	/** Reference to metrics subsystem (for reporting production events) */
+	UPROPERTY(EditAnywhere, Category = "Input", meta = (Optional))
+	TObjectPtr<class UPraxisMetricsSubsystem> Metrics = nullptr;
+	
+	/** Track previous state for reporting */
+	FString PreviousState;
 };
 
 /**
