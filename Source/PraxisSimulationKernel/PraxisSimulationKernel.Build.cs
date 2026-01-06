@@ -15,8 +15,8 @@ public class PraxisSimulationKernel : ModuleRules
                 "StateTreeModule",          // Core StateTree types
                 "GameplayStateTreeModule",  // UStateTreeComponent
                 "GameplayTags",
-                "MassEntity",    // Add this
-                "MassCommon"     // Add this
+                "MassEntity",
+                "MassCommon"
             }
         );
 

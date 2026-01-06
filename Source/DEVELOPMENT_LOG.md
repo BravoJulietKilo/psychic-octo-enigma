@@ -7,6 +7,149 @@ Implemented comprehensive metrics/telemetry system for production tracking and O
 
 ---
 
+### 7. UMassEntitySubsystem Issue & Custom Subsystem
+**Time:** Mid session
+**Problem:** `UMassEntitySubsystem` was null at runtime despite MassEntity plugin being enabled
+
+**Root Cause:**
+- `UMassEntitySubsystem::ShouldCreateSubsystem()` requires `MassGameplay` plugin
+- `MassGameplay` plugin caused engine crashes when enabled
+- `FMassEntityManager` uses `TSharedFromThis`, cannot be stored as plain member
+
+**Solution:**
+Created custom `UPraxisMassSubsystem` in PraxisMass module:
+```cpp
+class UPraxisMassSubsystem : public UWorldSubsystem
+{
+    TSharedPtr<FMassEntityManager> EntityManager;  // Must be TSharedPtr!
+    
+    virtual bool ShouldCreateSubsystem(UObject* Outer) const override
+    {
+        // Create for Game, PIE, and GamePreview worlds
+    }
+};
+```
+
+**Key Insight:** `FMassEntityManager` inherits from `TSharedFromThis<FMassEntityManager>`, so it MUST be managed via `TSharedPtr`, not as a direct member variable.
+
+**Result:** ✅ **SUCCESS** - Mass entities now work without MassGameplay plugin
+
+---
+
+### 8. Debug Helper Function
+**Time:** Late session
+**Request:** Add debug print function for easy testing
+**Actions:**
+
+Added `DebugPrintInventory(FName SKU)` to PraxisInventoryService:
+- Prints formatted inventory summary to log
+- Shows: Total, Reserved, Available, Volume
+- Shows: Quantity by Location
+- Shows: Quantity by State (RM/WIP/FG/Scrap)
+- Shows: Total entity count
+
+**Result:** ✅ **SUCCESS**
+
+---
+
+## Phase 1 Complete - Test Results
+
+**Test Run Output:**
+```
+LogPraxisSim: Registered location Warehouse_RM (Type: 0): 1000.0 m³, 100 batches max
+LogPraxisSim: Added 500 units of Steel_Bar to Warehouse_RM.Zone_A (Entity: 1)
+...
+LogPraxisMass: PraxisMassSubsystem deinitialized
+LogPraxisSim: Inventory service deinitialized - cleaned up 1 entities
+```
+
+**Verified:**
+- ✅ Location registration works
+- ✅ Mass entity spawning works
+- ✅ Entity cleanup on shutdown works
+- ✅ No crashes or errors
+
+---
+
+## Files Created/Modified This Session
+
+### New Files
+```
+PraxisCore/Public/Types/EPraxisLocationType.h       [NEW]
+PraxisMass/Public/PraxisMassSubsystem.h             [NEW]
+PraxisMass/Private/PraxisMassSubsystem.cpp          [NEW]
+```
+
+### Modified Files
+```
+PraxisCore/PraxisCore.Build.cs                      [MODIFIED - Mass dependencies]
+PraxisCore/Public/PraxisInventoryService.h          [MODIFIED - full API]
+PraxisCore/Private/PraxisInventoryService.cpp       [MODIFIED - implementation]
+PraxisMass/Public/Fragments/MaterialFragments.h     [MODIFIED - enum fixes]
+```
+
+---
+
+## Current State (Phase 1 Complete)
+
+### ✅ Working
+1. **Custom Mass Subsystem** - `UPraxisMassSubsystem` manages `FMassEntityManager`
+2. **Location Registration** - Two-level hierarchy with capacity tracking
+3. **Entity Spawning** - `SpawnMaterialEntity()` creates Mass entities with 6 fragments
+4. **AddRawMaterial** - Full flow: validate → spawn → record transaction → update cache
+5. **Aggregate Cache** - `UpdateAggregates()` queries entities
+6. **Entity Cleanup** - Proper deinitialization on world teardown
+7. **Debug Helpers** - `DebugPrintInventory()` for testing
+
+### 🏗️ Phase 2 (Next)
+- `ReserveMaterial()` - Mark entities as reserved for work orders
+- `TransferMaterial()` - Move entities between locations  
+- StateTree integration - Consume RM, produce FG/Scrap
+
+### 🏗️ Phase 3 (Later)
+- `TransformMaterial()` - BOM-based transformations
+- `ShipFinishedGoods()` - Remove FG from system
+- Complex BOMs (M:N ratios)
+- Niagara visualization
+
+---
+
+## Key Technical Lessons
+
+### FMassEntityManager Ownership
+**Problem:** Engine crash on PIE start
+```
+Assertion failed: Result.Pin().Get() == this
+[FMassEntityManager::Initialize -> FMassDebugger::RegisterEntityManager -> AsWeak()]
+```
+
+**Cause:** `FMassEntityManager` inherits `TSharedFromThis` but was stored as plain member.
+
+**Solution:** Store as `TSharedPtr<FMassEntityManager>` and use `MakeShared<>()`.
+
+### Mass Plugin Dependencies
+- `MassEntity` - Core types, can work standalone
+- `MassGameplay` - Provides `UMassEntitySubsystem`, but unstable
+- **Recommendation:** Create custom subsystem to avoid MassGameplay dependency
+
+---
+
+## Commit Summary
+
+```
+git commit -m "Phase 1 complete: Mass ECS inventory with custom PraxisMassSubsystem
+
+- Created UPraxisMassSubsystem to manage FMassEntityManager (TSharedPtr required)
+- Implemented entity spawning with 6 fragments
+- Added location registration with capacity tracking  
+- Aggregate cache for O(1) inventory queries
+- Transaction history logging
+- DebugPrintInventory helper for testing
+- Bypasses unstable MassGameplay plugin dependency"
+```
+
+---
+
 ## System B: Metrics & Telemetry Implementation
 
 ### 1. PraxisMetricsSubsystem Creation

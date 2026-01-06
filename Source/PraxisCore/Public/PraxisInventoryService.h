@@ -12,7 +12,7 @@
 #include "PraxisInventoryService.generated.h"
 
 // Forward declarations
-class UMassEntitySubsystem;
+class UPraxisMassSubsystem;
 
 /**
  * Location Capacity Definition
@@ -284,6 +284,10 @@ public:
 	/** Get total entity count (for debugging) */
 	UFUNCTION(BlueprintCallable, Category = "Praxis|Inventory")
 	int32 GetTotalEntityCount() const { return MaterialEntities.Num(); }
+	
+	/** Debug print inventory summary to log */
+	UFUNCTION(BlueprintCallable, Category = "Praxis|Inventory")
+	void DebugPrintInventory(FName SKU) const;
 
 	// ═══════════════════════════════════════════════════════════════════════════
 	// Configuration
@@ -356,9 +360,9 @@ private:
 	// Data
 	// ═══════════════════════════════════════════════════════════════════════════
 	
-	/** Mass entity subsystem reference */
+	/** Praxis Mass subsystem reference */
 	UPROPERTY()
-	TObjectPtr<UMassEntitySubsystem> MassEntitySubsystem = nullptr;
+	TObjectPtr<UPraxisMassSubsystem> MassSubsystem = nullptr;
 	
 	/** Archetype handle for material entities */
 	FMassArchetypeHandle MaterialArchetype;

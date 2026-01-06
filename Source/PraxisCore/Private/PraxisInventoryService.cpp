@@ -2,7 +2,7 @@
 
 #include "PraxisInventoryService.h"
 #include "PraxisCore.h"
-#include "MassEntitySubsystem.h"
+#include "PraxisMassSubsystem.h"
 #include "Fragments/MaterialFragments.h"
 
 // ════════════════════════════════════════════════════════════════════════════════
@@ -13,12 +13,12 @@ void UPraxisInventoryService::Initialize(FSubsystemCollectionBase& Collection)
 {
 	Super::Initialize(Collection);
 	
-	// Get Mass entity subsystem
+	// Get our custom Mass subsystem
 	if (UWorld* World = GetWorld())
 	{
-		MassEntitySubsystem = World->GetSubsystem<UMassEntitySubsystem>();
+		MassSubsystem = World->GetSubsystem<UPraxisMassSubsystem>();
 		
-		if (MassEntitySubsystem)
+		if (MassSubsystem && MassSubsystem->IsInitialized())
 		{
 			BuildMaterialEntityTemplate();
 			UE_LOG(LogPraxisSim, Log, TEXT("Inventory service initialized with Mass entity support (Archetype: %s)"), 
@@ -26,7 +26,8 @@ void UPraxisInventoryService::Initialize(FSubsystemCollectionBase& Collection)
 		}
 		else
 		{
-			UE_LOG(LogPraxisSim, Warning, TEXT("Inventory service: MassEntitySubsystem not found. Mass features will be unavailable."));
+			UE_LOG(LogPraxisSim, Warning, TEXT("Inventory service: PraxisMassSubsystem not found or not initialized."));
+			UE_LOG(LogPraxisSim, Warning, TEXT("  World Type: %d"), (int32)World->WorldType);
 		}
 	}
 	else
@@ -41,9 +42,9 @@ void UPraxisInventoryService::Deinitialize()
 	const int32 EntityCount = MaterialEntities.Num();
 	
 	// Cleanup all material entities
-	if (MassEntitySubsystem)
+	if (MassSubsystem && MassSubsystem->IsInitialized())
 	{
-		FMassEntityManager& EntityManager = MassEntitySubsystem->GetMutableEntityManager();
+		FMassEntityManager& EntityManager = MassSubsystem->GetMutableEntityManager();
 		
 		for (const FMassEntityHandle& Entity : MaterialEntities)
 		{
@@ -68,13 +69,13 @@ void UPraxisInventoryService::Deinitialize()
 
 void UPraxisInventoryService::BuildMaterialEntityTemplate()
 {
-	if (!MassEntitySubsystem || bArchetypeInitialized)
+	if (!MassSubsystem || !MassSubsystem->IsInitialized() || bArchetypeInitialized)
 	{
 		return;
 	}
 	
 	// Build fragment requirements for material entities
-	FMassEntityManager& EntityManager = MassEntitySubsystem->GetMutableEntityManager();
+	FMassEntityManager& EntityManager = MassSubsystem->GetMutableEntityManager();
 	
 	// Create archetype composition descriptor with all material fragments
 	FMassArchetypeCompositionDescriptor Composition;
@@ -110,9 +111,9 @@ bool UPraxisInventoryService::AddRawMaterial(
 	FName SubLocationId,
 	float VolumePerUnit)
 {
-	if (!MassEntitySubsystem)
+	if (!MassSubsystem || !MassSubsystem->IsInitialized())
 	{
-		UE_LOG(LogPraxisSim, Error, TEXT("Cannot add material - MassEntitySubsystem is null. Ensure Mass plugin is enabled."));
+		UE_LOG(LogPraxisSim, Error, TEXT("Cannot add material - PraxisMassSubsystem is not available."));
 		return false;
 	}
 	
@@ -162,7 +163,7 @@ bool UPraxisInventoryService::AddRawMaterial(
 		Transaction.Timestamp = FDateTime::UtcNow();
 		
 		// Get batch ID from entity for transaction record
-		FMassEntityManager& EntityManager = MassEntitySubsystem->GetMutableEntityManager();
+		FMassEntityManager& EntityManager = MassSubsystem->GetMutableEntityManager();
 		if (const FMaterialGenealogyFragment* Genealogy = EntityManager.GetFragmentDataPtr<FMaterialGenealogyFragment>(Entity))
 		{
 			Transaction.BatchId = Genealogy->BatchId;
@@ -343,13 +344,13 @@ FMassEntityHandle UPraxisInventoryService::SpawnMaterialEntity(
 	float VolumePerUnit,
 	EMaterialState InitialState)
 {
-	if (!MassEntitySubsystem || !bArchetypeInitialized)
+	if (!MassSubsystem || !MassSubsystem->IsInitialized() || !bArchetypeInitialized)
 	{
 		UE_LOG(LogPraxisSim, Error, TEXT("Cannot spawn entity - subsystem or archetype not ready"));
 		return FMassEntityHandle();
 	}
 	
-	FMassEntityManager& EntityManager = MassEntitySubsystem->GetMutableEntityManager();
+	FMassEntityManager& EntityManager = MassSubsystem->GetMutableEntityManager();
 	
 	// Create entity
 	FMassEntityHandle Entity = EntityManager.CreateEntity(MaterialArchetype);
@@ -417,12 +418,12 @@ FMassEntityHandle UPraxisInventoryService::SpawnMaterialEntity(
 
 void UPraxisInventoryService::DespawnMaterialEntities(const TArray<FMassEntityHandle>& Entities)
 {
-	if (!MassEntitySubsystem)
+	if (!MassSubsystem || !MassSubsystem->IsInitialized())
 	{
 		return;
 	}
 	
-	FMassEntityManager& EntityManager = MassEntitySubsystem->GetMutableEntityManager();
+	FMassEntityManager& EntityManager = MassSubsystem->GetMutableEntityManager();
 	
 	for (const FMassEntityHandle& Entity : Entities)
 	{
@@ -436,7 +437,7 @@ void UPraxisInventoryService::DespawnMaterialEntities(const TArray<FMassEntityHa
 
 void UPraxisInventoryService::UpdateAggregates()
 {
-	if (!MassEntitySubsystem)
+	if (!MassSubsystem || !MassSubsystem->IsInitialized())
 	{
 		return;
 	}
@@ -444,7 +445,7 @@ void UPraxisInventoryService::UpdateAggregates()
 	// Clear existing cache
 	InventoryCache.Empty();
 	
-	FMassEntityManager& EntityManager = MassEntitySubsystem->GetMutableEntityManager();
+	FMassEntityManager& EntityManager = MassSubsystem->GetMutableEntityManager();
 	
 	// Iterate through all tracked material entities
 	for (int32 i = 0; i < MaterialEntities.Num(); ++i)
@@ -573,4 +574,41 @@ bool UPraxisInventoryService::UpdateLocationCapacity(FName LocationId, float Vol
 	}
 	
 	return true;
+}
+
+void UPraxisInventoryService::DebugPrintInventory(FName SKU) const
+{
+	FInventorySummary Summary = GetInventorySummary(SKU);
+	
+	UE_LOG(LogPraxisSim, Log, TEXT("═══════════════════════════════════════════════════════════"));
+	UE_LOG(LogPraxisSim, Log, TEXT("INVENTORY SUMMARY: %s"), *SKU.ToString());
+	UE_LOG(LogPraxisSim, Log, TEXT("═══════════════════════════════════════════════════════════"));
+	UE_LOG(LogPraxisSim, Log, TEXT("  Total Quantity: %d"), Summary.TotalQuantity);
+	UE_LOG(LogPraxisSim, Log, TEXT("  Reserved: %d"), Summary.ReservedQuantity);
+	UE_LOG(LogPraxisSim, Log, TEXT("  Available: %d"), Summary.GetAvailableQuantity());
+	UE_LOG(LogPraxisSim, Log, TEXT("  Total Volume: %.2f m³"), Summary.TotalVolume);
+	
+	UE_LOG(LogPraxisSim, Log, TEXT("  By Location:"));
+	for (const auto& Pair : Summary.QuantityByLocation)
+	{
+		UE_LOG(LogPraxisSim, Log, TEXT("    %s: %d"), *Pair.Key.ToString(), Pair.Value);
+	}
+	
+	UE_LOG(LogPraxisSim, Log, TEXT("  By State:"));
+	for (const auto& Pair : Summary.QuantityByState)
+	{
+		FString StateName;
+		switch (static_cast<EMaterialState>(Pair.Key))
+		{
+			case EMaterialState::RawMaterial: StateName = TEXT("RawMaterial"); break;
+			case EMaterialState::WorkInProcess: StateName = TEXT("WIP"); break;
+			case EMaterialState::FinishedGoods: StateName = TEXT("FinishedGood"); break;
+			case EMaterialState::Scrap: StateName = TEXT("Scrap"); break;
+			default: StateName = TEXT("Unknown"); break;
+		}
+		UE_LOG(LogPraxisSim, Log, TEXT("    %s: %d"), *StateName, Pair.Value);
+	}
+	
+	UE_LOG(LogPraxisSim, Log, TEXT("  Total Entities: %d"), MaterialEntities.Num());
+	UE_LOG(LogPraxisSim, Log, TEXT("═══════════════════════════════════════════════════════════"));
 }
