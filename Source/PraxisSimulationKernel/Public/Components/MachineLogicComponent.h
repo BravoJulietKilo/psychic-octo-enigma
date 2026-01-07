@@ -35,7 +35,7 @@ public:
 	
 	/** Assign a work order to this machine */
 	UFUNCTION(BlueprintCallable, Category = "Machine")
-	void AssignWorkOrder(const FString& SKU, int32 Quantity);
+	void AssignWorkOrder(int64 WorkOrderId, const FString& SKU, int32 Quantity);
 	
 	/** Get current machine state for debugging/monitoring */
 	UFUNCTION(BlueprintCallable, Category = "Machine")

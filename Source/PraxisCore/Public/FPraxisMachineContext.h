@@ -68,6 +68,9 @@ struct PRAXISCORE_API FPraxisMachineContext
 	// ═══════════════════════════════════════════════════════════════════════════
 	
 	UPROPERTY(BlueprintReadWrite, Category="Runtime|WorkOrder")
+	int64 CurrentWorkOrderId = 0;
+	
+	UPROPERTY(BlueprintReadWrite, Category="Runtime|WorkOrder")
 	FString CurrentSKU;
 	
 	UPROPERTY(BlueprintReadWrite, Category="Runtime|WorkOrder")

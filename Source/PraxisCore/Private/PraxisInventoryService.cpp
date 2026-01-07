@@ -147,7 +147,7 @@ bool UPraxisInventoryService::AddRawMaterial(
 	
 	// Spawn material entity
 	FMassEntityHandle Entity = SpawnMaterialEntity(
-		SKU, Quantity, LocationId, SubLocationId, VolumePerUnit, EMaterialState::RawMaterial);
+		SKU, Quantity, LocationId, SubLocationId, VolumePerUnit, 0);  // 0 = RawMaterial
 	
 	if (Entity.IsSet())
 	{
@@ -196,9 +196,538 @@ bool UPraxisInventoryService::ReserveMaterial(
 	int64 WorkOrderId,
 	FName MachineId)
 {
-	// TODO: Implement reservation logic in Phase 2
-	UE_LOG(LogPraxisSim, Warning, TEXT("ReserveMaterial not yet implemented"));
-	return false;
+	if (!MassSubsystem || !MassSubsystem->IsInitialized())
+	{
+		UE_LOG(LogPraxisSim, Error, TEXT("Cannot reserve material - Mass subsystem not available"));
+		return false;
+	}
+	
+	if (Quantity <= 0)
+	{
+		UE_LOG(LogPraxisSim, Warning, TEXT("Cannot reserve material - invalid quantity: %d"), Quantity);
+		return false;
+	}
+	
+	FMassEntityManager& EntityManager = MassSubsystem->GetMutableEntityManager();
+	
+	// Find unreserved entities matching SKU and location
+	int32 RemainingToReserve = Quantity;
+	TArray<FMassEntityHandle> EntitiesToReserve;
+	
+	for (const FMassEntityHandle& Entity : MaterialEntities)
+	{
+		if (!EntityManager.IsEntityValid(Entity))
+		{
+			continue;
+		}
+		
+		// Check SKU match
+		const FMaterialTypeFragment* TypeFrag = EntityManager.GetFragmentDataPtr<FMaterialTypeFragment>(Entity);
+		if (!TypeFrag || TypeFrag->SKU != SKU)
+		{
+			continue;
+		}
+		
+		// Check location match
+		const FMaterialLocationFragment* LocationFrag = EntityManager.GetFragmentDataPtr<FMaterialLocationFragment>(Entity);
+		if (!LocationFrag || LocationFrag->LocationId != LocationId)
+		{
+			continue;
+		}
+		
+		// Check not already reserved
+		const FMaterialReservationFragment* ReservationFrag = EntityManager.GetFragmentDataPtr<FMaterialReservationFragment>(Entity);
+		if (!ReservationFrag || ReservationFrag->bReserved)
+		{
+			continue;
+		}
+		
+		// Check quantity available
+		const FMaterialQuantityFragment* QuantityFrag = EntityManager.GetFragmentDataPtr<FMaterialQuantityFragment>(Entity);
+		if (!QuantityFrag || QuantityFrag->Quantity <= 0)
+		{
+			continue;
+		}
+		
+		// This entity can contribute to the reservation
+		EntitiesToReserve.Add(Entity);
+		RemainingToReserve -= QuantityFrag->Quantity;
+		
+		if (RemainingToReserve <= 0)
+		{
+			break;  // We have enough
+		}
+	}
+	
+	// Check if we found enough material
+	if (RemainingToReserve > 0)
+	{
+		UE_LOG(LogPraxisSim, Warning, 
+			TEXT("Insufficient unreserved %s at %s. Needed: %d, Available: %d"),
+			*SKU.ToString(), *LocationId.ToString(), Quantity, Quantity - RemainingToReserve);
+		return false;
+	}
+	
+	// Mark entities as reserved
+	int32 TotalReserved = 0;
+	for (const FMassEntityHandle& Entity : EntitiesToReserve)
+	{
+		FMaterialReservationFragment* ReservationFrag = EntityManager.GetFragmentDataPtr<FMaterialReservationFragment>(Entity);
+		const FMaterialQuantityFragment* QuantityFrag = EntityManager.GetFragmentDataPtr<FMaterialQuantityFragment>(Entity);
+		
+		if (ReservationFrag && QuantityFrag)
+		{
+			ReservationFrag->bReserved = true;
+			ReservationFrag->ReservedForWorkOrder = WorkOrderId;
+			ReservationFrag->ReservedForMachine = MachineId;
+			ReservationFrag->ReservationTime = GetWorld()->GetTimeSeconds();
+			
+			TotalReserved += QuantityFrag->Quantity;
+		}
+	}
+	
+	// Log transaction
+	FInventoryTransaction Transaction;
+	Transaction.TransactionType = TEXT("Reservation");
+	Transaction.SKU = SKU;
+	Transaction.QuantityDelta = TotalReserved;
+	Transaction.LocationId = LocationId;
+	Transaction.Reference = FString::Printf(TEXT("WO:%lld Machine:%s"), WorkOrderId, *MachineId.ToString());
+	Transaction.Timestamp = FDateTime::UtcNow();
+	LogTransaction(Transaction);
+	
+	// Update aggregates
+	UpdateAggregates();
+	
+	UE_LOG(LogPraxisSim, Log, 
+		TEXT("Reserved %d units of %s at %s for WO:%lld (Machine: %s)"),
+		TotalReserved, *SKU.ToString(), *LocationId.ToString(), WorkOrderId, *MachineId.ToString());
+	
+	return true;
+}
+
+// ════════════════════════════════════════════════════════════════════════════════
+// Production Operations
+// ════════════════════════════════════════════════════════════════════════════════
+
+bool UPraxisInventoryService::ConsumeReservedMaterial(
+	FName MachineId,
+	int64 WorkOrderId,
+	FName SKU)
+{
+	if (!MassSubsystem || !MassSubsystem->IsInitialized())
+	{
+		UE_LOG(LogPraxisSim, Error, TEXT("Cannot consume material - Mass subsystem not available"));
+		return false;
+	}
+	
+	FMassEntityManager& EntityManager = MassSubsystem->GetMutableEntityManager();
+	
+	// Find a reserved entity matching the work order and machine
+	FMassEntityHandle FoundEntity;
+	float VolumePerUnit = 0.01f;
+	
+	for (const FMassEntityHandle& Entity : MaterialEntities)
+	{
+		if (!EntityManager.IsEntityValid(Entity))
+		{
+			continue;
+		}
+		
+		// Check reservation matches
+		const FMaterialReservationFragment* ResFrag = EntityManager.GetFragmentDataPtr<FMaterialReservationFragment>(Entity);
+		if (!ResFrag || !ResFrag->bReserved)
+		{
+			continue;
+		}
+		
+		if (ResFrag->ReservedForWorkOrder != WorkOrderId || ResFrag->ReservedForMachine != MachineId)
+		{
+			continue;
+		}
+		
+		// Check SKU matches
+		const FMaterialTypeFragment* TypeFrag = EntityManager.GetFragmentDataPtr<FMaterialTypeFragment>(Entity);
+		if (!TypeFrag || TypeFrag->SKU != SKU)
+		{
+			continue;
+		}
+		
+		// Check has quantity
+		const FMaterialQuantityFragment* QtyFrag = EntityManager.GetFragmentDataPtr<FMaterialQuantityFragment>(Entity);
+		if (!QtyFrag || QtyFrag->Quantity <= 0)
+		{
+			continue;
+		}
+		
+		FoundEntity = Entity;
+		VolumePerUnit = QtyFrag->VolumePerUnit;
+		break;
+	}
+	
+	if (!FoundEntity.IsSet())
+	{
+		UE_LOG(LogPraxisSim, Warning, 
+			TEXT("No reserved %s found for WO:%lld on Machine:%s"),
+			*SKU.ToString(), WorkOrderId, *MachineId.ToString());
+		return false;
+	}
+	
+	// Get fragment pointers
+	FMaterialQuantityFragment* QtyFrag = EntityManager.GetFragmentDataPtr<FMaterialQuantityFragment>(FoundEntity);
+	FMaterialLocationFragment* LocFrag = EntityManager.GetFragmentDataPtr<FMaterialLocationFragment>(FoundEntity);
+	FMaterialStateFragment* StateFrag = EntityManager.GetFragmentDataPtr<FMaterialStateFragment>(FoundEntity);
+	const FMaterialGenealogyFragment* GenFrag = EntityManager.GetFragmentDataPtr<FMaterialGenealogyFragment>(FoundEntity);
+	
+	if (!QtyFrag)
+	{
+		return false;
+	}
+	
+	FName SourceLocation = LocFrag ? LocFrag->LocationId : NAME_None;
+	FGuid ParentBatchId = GenFrag ? GenFrag->BatchId : FGuid();
+	
+	// Decrement quantity
+	QtyFrag->Quantity -= 1;
+	
+	// Update source location capacity
+	UpdateLocationCapacity(SourceLocation, -VolumePerUnit, 0);
+	
+	// Create WIP entity at machine
+	FName MachineWIPLocation = FName(*FString::Printf(TEXT("%s.WIP"), *MachineId.ToString()));
+	FMassEntityHandle WIPEntity = SpawnMaterialEntity(
+		SKU, 1, MachineWIPLocation, NAME_None, VolumePerUnit, 1);  // 1 = WorkInProcess
+	
+	if (WIPEntity.IsSet())
+	{
+		MaterialEntities.Add(WIPEntity);
+		
+		// Set genealogy to link to parent batch
+		FMaterialGenealogyFragment* WIPGenFrag = EntityManager.GetFragmentDataPtr<FMaterialGenealogyFragment>(WIPEntity);
+		if (WIPGenFrag && ParentBatchId.IsValid())
+		{
+			WIPGenFrag->ParentBatchIds.Add(ParentBatchId);
+			WIPGenFrag->SourceMachineId = MachineId;
+			WIPGenFrag->SourceWorkOrderId = WorkOrderId;
+		}
+		
+		// Set reservation on WIP to track it
+		FMaterialReservationFragment* WIPResFrag = EntityManager.GetFragmentDataPtr<FMaterialReservationFragment>(WIPEntity);
+		if (WIPResFrag)
+		{
+			WIPResFrag->bReserved = true;
+			WIPResFrag->ReservedForWorkOrder = WorkOrderId;
+			WIPResFrag->ReservedForMachine = MachineId;
+			WIPResFrag->ReservationTime = GetWorld()->GetTimeSeconds();
+		}
+	}
+	
+	// If source entity is depleted, remove it
+	if (QtyFrag->Quantity <= 0)
+	{
+		UpdateLocationCapacity(SourceLocation, 0, -1);  // Remove item count
+		EntityManager.DestroyEntity(FoundEntity);
+		MaterialEntities.Remove(FoundEntity);
+	}
+	
+	// Log transaction
+	FInventoryTransaction Transaction;
+	Transaction.TransactionType = TEXT("Consumption");
+	Transaction.SKU = SKU;
+	Transaction.QuantityDelta = -1;
+	Transaction.LocationId = SourceLocation;
+	Transaction.Reference = FString::Printf(TEXT("WO:%lld Machine:%s"), WorkOrderId, *MachineId.ToString());
+	Transaction.Timestamp = FDateTime::UtcNow();
+	LogTransaction(Transaction);
+	
+	UpdateAggregates();
+	
+	UE_LOG(LogPraxisSim, Verbose, 
+		TEXT("Consumed 1 %s for WO:%lld (Machine: %s) -> WIP"),
+		*SKU.ToString(), WorkOrderId, *MachineId.ToString());
+	
+	return true;
+}
+
+bool UPraxisInventoryService::ProduceFinishedGood(
+	FName MachineId,
+	int64 WorkOrderId,
+	FName OutputSKU,
+	FName OutputLocationId)
+{
+	if (!MassSubsystem || !MassSubsystem->IsInitialized())
+	{
+		UE_LOG(LogPraxisSim, Error, TEXT("Cannot produce FG - Mass subsystem not available"));
+		return false;
+	}
+	
+	FMassEntityManager& EntityManager = MassSubsystem->GetMutableEntityManager();
+	
+	// Find WIP entity for this machine/work order
+	FMassEntityHandle WIPEntity;
+	FName MachineWIPLocation = FName(*FString::Printf(TEXT("%s.WIP"), *MachineId.ToString()));
+	
+	for (const FMassEntityHandle& Entity : MaterialEntities)
+	{
+		if (!EntityManager.IsEntityValid(Entity))
+		{
+			continue;
+		}
+		
+		// Check state is WIP
+		const FMaterialStateFragment* StateFrag = EntityManager.GetFragmentDataPtr<FMaterialStateFragment>(Entity);
+		if (!StateFrag || StateFrag->State != EMaterialState::WorkInProcess)
+		{
+			continue;
+		}
+		
+		// Check location is machine WIP
+		const FMaterialLocationFragment* LocFrag = EntityManager.GetFragmentDataPtr<FMaterialLocationFragment>(Entity);
+		if (!LocFrag || LocFrag->LocationId != MachineWIPLocation)
+		{
+			continue;
+		}
+		
+		// Check reservation matches
+		const FMaterialReservationFragment* ResFrag = EntityManager.GetFragmentDataPtr<FMaterialReservationFragment>(Entity);
+		if (!ResFrag || ResFrag->ReservedForWorkOrder != WorkOrderId || ResFrag->ReservedForMachine != MachineId)
+		{
+			continue;
+		}
+		
+		WIPEntity = Entity;
+		break;
+	}
+	
+	if (!WIPEntity.IsSet())
+	{
+		UE_LOG(LogPraxisSim, Warning, 
+			TEXT("No WIP found for WO:%lld on Machine:%s"),
+			WorkOrderId, *MachineId.ToString());
+		return false;
+	}
+	
+	// Get WIP data
+	const FMaterialQuantityFragment* WIPQtyFrag = EntityManager.GetFragmentDataPtr<FMaterialQuantityFragment>(WIPEntity);
+	const FMaterialGenealogyFragment* WIPGenFrag = EntityManager.GetFragmentDataPtr<FMaterialGenealogyFragment>(WIPEntity);
+	
+	float VolumePerUnit = WIPQtyFrag ? WIPQtyFrag->VolumePerUnit : 0.01f;
+	FGuid WIPBatchId = WIPGenFrag ? WIPGenFrag->BatchId : FGuid();
+	
+	// Destroy WIP entity
+	EntityManager.DestroyEntity(WIPEntity);
+	MaterialEntities.Remove(WIPEntity);
+	
+	// Create FG entity at output location
+	FMassEntityHandle FGEntity = SpawnMaterialEntity(
+		OutputSKU, 1, OutputLocationId, NAME_None, VolumePerUnit, 2);  // 2 = FinishedGoods
+	
+	if (FGEntity.IsSet())
+	{
+		MaterialEntities.Add(FGEntity);
+		
+		// Set genealogy
+		FMaterialGenealogyFragment* FGGenFrag = EntityManager.GetFragmentDataPtr<FMaterialGenealogyFragment>(FGEntity);
+		if (FGGenFrag)
+		{
+			if (WIPBatchId.IsValid())
+			{
+				FGGenFrag->ParentBatchIds.Add(WIPBatchId);
+			}
+			FGGenFrag->SourceMachineId = MachineId;
+			FGGenFrag->SourceWorkOrderId = WorkOrderId;
+			FGGenFrag->bPassedQuality = true;
+		}
+		
+		// Update destination capacity
+		UpdateLocationCapacity(OutputLocationId, VolumePerUnit, 1);
+	}
+	
+	// Log transaction
+	FInventoryTransaction Transaction;
+	Transaction.TransactionType = TEXT("Production");
+	Transaction.SKU = OutputSKU;
+	Transaction.QuantityDelta = 1;
+	Transaction.LocationId = OutputLocationId;
+	Transaction.Reference = FString::Printf(TEXT("WO:%lld Machine:%s"), WorkOrderId, *MachineId.ToString());
+	Transaction.Timestamp = FDateTime::UtcNow();
+	LogTransaction(Transaction);
+	
+	UpdateAggregates();
+	
+	UE_LOG(LogPraxisSim, Verbose, 
+		TEXT("Produced 1 %s for WO:%lld (Machine: %s) -> %s"),
+		*OutputSKU.ToString(), WorkOrderId, *MachineId.ToString(), *OutputLocationId.ToString());
+	
+	OnInventoryChanged.Broadcast(OutputSKU, OutputLocationId, 1);
+	return true;
+}
+
+bool UPraxisInventoryService::ProduceScrap(
+	FName MachineId,
+	int64 WorkOrderId,
+	FName SKU,
+	FName ScrapLocationId)
+{
+	if (!MassSubsystem || !MassSubsystem->IsInitialized())
+	{
+		UE_LOG(LogPraxisSim, Error, TEXT("Cannot produce scrap - Mass subsystem not available"));
+		return false;
+	}
+	
+	FMassEntityManager& EntityManager = MassSubsystem->GetMutableEntityManager();
+	
+	// Find WIP entity for this machine/work order
+	FMassEntityHandle WIPEntity;
+	FName MachineWIPLocation = FName(*FString::Printf(TEXT("%s.WIP"), *MachineId.ToString()));
+	
+	for (const FMassEntityHandle& Entity : MaterialEntities)
+	{
+		if (!EntityManager.IsEntityValid(Entity))
+		{
+			continue;
+		}
+		
+		// Check state is WIP
+		const FMaterialStateFragment* StateFrag = EntityManager.GetFragmentDataPtr<FMaterialStateFragment>(Entity);
+		if (!StateFrag || StateFrag->State != EMaterialState::WorkInProcess)
+		{
+			continue;
+		}
+		
+		// Check location is machine WIP
+		const FMaterialLocationFragment* LocFrag = EntityManager.GetFragmentDataPtr<FMaterialLocationFragment>(Entity);
+		if (!LocFrag || LocFrag->LocationId != MachineWIPLocation)
+		{
+			continue;
+		}
+		
+		// Check reservation matches
+		const FMaterialReservationFragment* ResFrag = EntityManager.GetFragmentDataPtr<FMaterialReservationFragment>(Entity);
+		if (!ResFrag || ResFrag->ReservedForWorkOrder != WorkOrderId || ResFrag->ReservedForMachine != MachineId)
+		{
+			continue;
+		}
+		
+		WIPEntity = Entity;
+		break;
+	}
+	
+	if (!WIPEntity.IsSet())
+	{
+		UE_LOG(LogPraxisSim, Warning, 
+			TEXT("No WIP found for WO:%lld on Machine:%s to scrap"),
+			WorkOrderId, *MachineId.ToString());
+		return false;
+	}
+	
+	// Get WIP data
+	const FMaterialQuantityFragment* WIPQtyFrag = EntityManager.GetFragmentDataPtr<FMaterialQuantityFragment>(WIPEntity);
+	const FMaterialGenealogyFragment* WIPGenFrag = EntityManager.GetFragmentDataPtr<FMaterialGenealogyFragment>(WIPEntity);
+	
+	float VolumePerUnit = WIPQtyFrag ? WIPQtyFrag->VolumePerUnit : 0.01f;
+	FGuid WIPBatchId = WIPGenFrag ? WIPGenFrag->BatchId : FGuid();
+	
+	// Destroy WIP entity
+	EntityManager.DestroyEntity(WIPEntity);
+	MaterialEntities.Remove(WIPEntity);
+	
+	// Create Scrap entity at scrap location
+	FMassEntityHandle ScrapEntity = SpawnMaterialEntity(
+		SKU, 1, ScrapLocationId, NAME_None, VolumePerUnit, 3);  // 3 = Scrap
+	
+	if (ScrapEntity.IsSet())
+	{
+		MaterialEntities.Add(ScrapEntity);
+		
+		// Set genealogy with quality flag false
+		FMaterialGenealogyFragment* ScrapGenFrag = EntityManager.GetFragmentDataPtr<FMaterialGenealogyFragment>(ScrapEntity);
+		if (ScrapGenFrag)
+		{
+			if (WIPBatchId.IsValid())
+			{
+				ScrapGenFrag->ParentBatchIds.Add(WIPBatchId);
+			}
+			ScrapGenFrag->SourceMachineId = MachineId;
+			ScrapGenFrag->SourceWorkOrderId = WorkOrderId;
+			ScrapGenFrag->bPassedQuality = false;  // Failed quality
+		}
+		
+		// Update destination capacity
+		UpdateLocationCapacity(ScrapLocationId, VolumePerUnit, 1);
+	}
+	
+	// Log transaction
+	FInventoryTransaction Transaction;
+	Transaction.TransactionType = TEXT("Scrap");
+	Transaction.SKU = SKU;
+	Transaction.QuantityDelta = 1;
+	Transaction.LocationId = ScrapLocationId;
+	Transaction.Reference = FString::Printf(TEXT("WO:%lld Machine:%s"), WorkOrderId, *MachineId.ToString());
+	Transaction.Timestamp = FDateTime::UtcNow();
+	LogTransaction(Transaction);
+	
+	UpdateAggregates();
+	
+	UE_LOG(LogPraxisSim, Verbose, 
+		TEXT("Scrapped 1 %s for WO:%lld (Machine: %s) -> %s"),
+		*SKU.ToString(), WorkOrderId, *MachineId.ToString(), *ScrapLocationId.ToString());
+	
+	return true;
+}
+
+bool UPraxisInventoryService::ReleaseReservation(
+	FName MachineId,
+	int64 WorkOrderId)
+{
+	if (!MassSubsystem || !MassSubsystem->IsInitialized())
+	{
+		UE_LOG(LogPraxisSim, Error, TEXT("Cannot release reservation - Mass subsystem not available"));
+		return false;
+	}
+	
+	FMassEntityManager& EntityManager = MassSubsystem->GetMutableEntityManager();
+	
+	int32 ReleasedCount = 0;
+	
+	// Find all entities reserved for this work order/machine
+	for (const FMassEntityHandle& Entity : MaterialEntities)
+	{
+		if (!EntityManager.IsEntityValid(Entity))
+		{
+			continue;
+		}
+		
+		FMaterialReservationFragment* ResFrag = EntityManager.GetFragmentDataPtr<FMaterialReservationFragment>(Entity);
+		if (!ResFrag || !ResFrag->bReserved)
+		{
+			continue;
+		}
+		
+		if (ResFrag->ReservedForWorkOrder != WorkOrderId || ResFrag->ReservedForMachine != MachineId)
+		{
+			continue;
+		}
+		
+		// Release the reservation
+		ResFrag->bReserved = false;
+		ResFrag->ReservedForWorkOrder = 0;
+		ResFrag->ReservedForMachine = NAME_None;
+		ResFrag->ReservationTime = 0.0;
+		
+		ReleasedCount++;
+	}
+	
+	if (ReleasedCount > 0)
+	{
+		UpdateAggregates();
+		
+		UE_LOG(LogPraxisSim, Log, 
+			TEXT("Released %d reservations for WO:%lld (Machine: %s)"),
+			ReleasedCount, WorkOrderId, *MachineId.ToString());
+	}
+	
+	return ReleasedCount > 0;
 }
 
 bool UPraxisInventoryService::TransformMaterial(
@@ -228,9 +757,180 @@ bool UPraxisInventoryService::TransferMaterial(
 	FName FromLocation,
 	FName ToLocation)
 {
-	// TODO: Implement transfer logic in Phase 2
-	UE_LOG(LogPraxisSim, Warning, TEXT("TransferMaterial not yet implemented"));
-	return false;
+	if (!MassSubsystem || !MassSubsystem->IsInitialized())
+	{
+		UE_LOG(LogPraxisSim, Error, TEXT("Cannot transfer material - Mass subsystem not available"));
+		return false;
+	}
+	
+	if (Quantity <= 0)
+	{
+		UE_LOG(LogPraxisSim, Warning, TEXT("Cannot transfer material - invalid quantity: %d"), Quantity);
+		return false;
+	}
+	
+	if (FromLocation == ToLocation)
+	{
+		UE_LOG(LogPraxisSim, Warning, TEXT("Cannot transfer material - source and destination are the same"));
+		return false;
+	}
+	
+	FMassEntityManager& EntityManager = MassSubsystem->GetMutableEntityManager();
+	
+	// Find entities to transfer (unreserved, matching SKU and source location)
+	int32 RemainingToTransfer = Quantity;
+	TArray<TPair<FMassEntityHandle, int32>> EntitiesToTransfer;  // Entity + quantity to take from it
+	float TotalVolumeToTransfer = 0.0f;
+	
+	for (const FMassEntityHandle& Entity : MaterialEntities)
+	{
+		if (!EntityManager.IsEntityValid(Entity))
+		{
+			continue;
+		}
+		
+		// Check SKU match
+		const FMaterialTypeFragment* TypeFrag = EntityManager.GetFragmentDataPtr<FMaterialTypeFragment>(Entity);
+		if (!TypeFrag || TypeFrag->SKU != SKU)
+		{
+			continue;
+		}
+		
+		// Check location match
+		const FMaterialLocationFragment* LocationFrag = EntityManager.GetFragmentDataPtr<FMaterialLocationFragment>(Entity);
+		if (!LocationFrag || LocationFrag->LocationId != FromLocation)
+		{
+			continue;
+		}
+		
+		// Check not reserved (can't transfer reserved material)
+		const FMaterialReservationFragment* ReservationFrag = EntityManager.GetFragmentDataPtr<FMaterialReservationFragment>(Entity);
+		if (ReservationFrag && ReservationFrag->bReserved)
+		{
+			continue;
+		}
+		
+		// Check quantity available
+		const FMaterialQuantityFragment* QuantityFrag = EntityManager.GetFragmentDataPtr<FMaterialQuantityFragment>(Entity);
+		if (!QuantityFrag || QuantityFrag->Quantity <= 0)
+		{
+			continue;
+		}
+		
+		// Calculate how much to take from this entity
+		const int32 TakeQuantity = FMath::Min(QuantityFrag->Quantity, RemainingToTransfer);
+		EntitiesToTransfer.Add(TPair<FMassEntityHandle, int32>(Entity, TakeQuantity));
+		TotalVolumeToTransfer += TakeQuantity * QuantityFrag->VolumePerUnit;
+		RemainingToTransfer -= TakeQuantity;
+		
+		if (RemainingToTransfer <= 0)
+		{
+			break;
+		}
+	}
+	
+	// Check if we found enough material
+	if (RemainingToTransfer > 0)
+	{
+		UE_LOG(LogPraxisSim, Warning, 
+			TEXT("Insufficient unreserved %s at %s. Needed: %d, Available: %d"),
+			*SKU.ToString(), *FromLocation.ToString(), Quantity, Quantity - RemainingToTransfer);
+		return false;
+	}
+	
+	// Check destination capacity
+	if (!HasCapacity(ToLocation, TotalVolumeToTransfer))
+	{
+		UE_LOG(LogPraxisSim, Warning, 
+			TEXT("Insufficient capacity at %s for %.2f m³"),
+			*ToLocation.ToString(), TotalVolumeToTransfer);
+		return false;
+	}
+	
+	// Perform transfers
+	int32 TotalTransferred = 0;
+	for (const auto& TransferPair : EntitiesToTransfer)
+	{
+		const FMassEntityHandle& Entity = TransferPair.Key;
+		const int32 TransferQty = TransferPair.Value;
+		
+		FMaterialQuantityFragment* QuantityFrag = EntityManager.GetFragmentDataPtr<FMaterialQuantityFragment>(Entity);
+		FMaterialLocationFragment* LocationFrag = EntityManager.GetFragmentDataPtr<FMaterialLocationFragment>(Entity);
+		
+		if (!QuantityFrag || !LocationFrag)
+		{
+			continue;
+		}
+		
+		const float TransferVolume = TransferQty * QuantityFrag->VolumePerUnit;
+		
+		if (TransferQty == QuantityFrag->Quantity)
+		{
+			// Transfer entire entity - just update location
+			LocationFrag->LocationId = ToLocation;
+			LocationFrag->LocationEnterTime = GetWorld()->GetTimeSeconds();
+			
+			// Update capacities
+			UpdateLocationCapacity(FromLocation, -TransferVolume, -1);
+			UpdateLocationCapacity(ToLocation, TransferVolume, 1);
+			
+			TotalTransferred += TransferQty;
+		}
+		else
+		{
+			// Partial transfer - reduce source and create new entity at destination
+			QuantityFrag->Quantity -= TransferQty;
+			
+			// Get state for new entity
+			const FMaterialStateFragment* StateFrag = EntityManager.GetFragmentDataPtr<FMaterialStateFragment>(Entity);
+			uint8 State = StateFrag ? static_cast<uint8>(StateFrag->State) : 0;
+			
+			// Spawn new entity at destination
+			FMassEntityHandle NewEntity = SpawnMaterialEntity(
+				SKU, TransferQty, ToLocation, NAME_None, QuantityFrag->VolumePerUnit, State);
+			
+			if (NewEntity.IsSet())
+			{
+				MaterialEntities.Add(NewEntity);
+				
+				// Copy genealogy from source
+				const FMaterialGenealogyFragment* SourceGenealogy = EntityManager.GetFragmentDataPtr<FMaterialGenealogyFragment>(Entity);
+				FMaterialGenealogyFragment* NewGenealogy = EntityManager.GetFragmentDataPtr<FMaterialGenealogyFragment>(NewEntity);
+				if (SourceGenealogy && NewGenealogy)
+				{
+					NewGenealogy->ParentBatchIds.Add(SourceGenealogy->BatchId);
+				}
+				
+				// Update capacities (source volume reduction, destination addition)
+				UpdateLocationCapacity(FromLocation, -TransferVolume, 0);  // Volume down, item count unchanged
+				UpdateLocationCapacity(ToLocation, TransferVolume, 1);    // New entity at destination
+				
+				TotalTransferred += TransferQty;
+			}
+		}
+	}
+	
+	// Log transaction
+	FInventoryTransaction Transaction;
+	Transaction.TransactionType = TEXT("Transfer");
+	Transaction.SKU = SKU;
+	Transaction.QuantityDelta = TotalTransferred;
+	Transaction.LocationId = ToLocation;
+	Transaction.Reference = FString::Printf(TEXT("From: %s"), *FromLocation.ToString());
+	Transaction.Timestamp = FDateTime::UtcNow();
+	LogTransaction(Transaction);
+	
+	// Update aggregates
+	UpdateAggregates();
+	
+	UE_LOG(LogPraxisSim, Log, 
+		TEXT("Transferred %d units of %s from %s to %s"),
+		TotalTransferred, *SKU.ToString(), *FromLocation.ToString(), *ToLocation.ToString());
+	
+	OnInventoryChanged.Broadcast(SKU, FromLocation, -TotalTransferred);
+	OnInventoryChanged.Broadcast(SKU, ToLocation, TotalTransferred);
+	
+	return true;
 }
 
 // ════════════════════════════════════════════════════════════════════════════════
@@ -342,7 +1042,7 @@ FMassEntityHandle UPraxisInventoryService::SpawnMaterialEntity(
 	FName LocationId,
 	FName SubLocationId,
 	float VolumePerUnit,
-	EMaterialState InitialState)
+	uint8 InitialState)
 {
 	if (!MassSubsystem || !MassSubsystem->IsInitialized() || !bArchetypeInitialized)
 	{
@@ -374,7 +1074,7 @@ FMassEntityHandle UPraxisInventoryService::SpawnMaterialEntity(
 	// Set State Fragment
 	if (FMaterialStateFragment* StateFrag = EntityManager.GetFragmentDataPtr<FMaterialStateFragment>(Entity))
 	{
-		StateFrag->State = InitialState;
+		StateFrag->State = static_cast<EMaterialState>(InitialState);
 		StateFrag->StateEnterTime = CurrentTime;
 	}
 	

@@ -9,6 +9,7 @@
 // Forward declarations
 class UMachineContextComponent;
 class UPraxisRandomService;
+class UPraxisInventoryService;
 struct FPraxisMachineContext;
 
 /**
@@ -30,6 +31,10 @@ struct FSTTask_ProductionInstanceData
 	/** Reference to metrics subsystem (for reporting production events) */
 	UPROPERTY(EditAnywhere, Category = "Input", meta = (Optional))
 	TObjectPtr<class UPraxisMetricsSubsystem> Metrics = nullptr;
+	
+	/** Reference to inventory service (for material consumption/production) */
+	UPROPERTY(EditAnywhere, Category = "Input", meta = (Optional))
+	TObjectPtr<UPraxisInventoryService> Inventory = nullptr;
 	
 	/** Track previous state for reporting */
 	FString PreviousState;

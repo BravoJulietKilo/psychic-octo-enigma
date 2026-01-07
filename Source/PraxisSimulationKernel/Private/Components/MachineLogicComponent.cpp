@@ -289,7 +289,7 @@ void UMachineLogicComponent::HandleEndSession()
 // Public API
 // ════════════════════════════════════════════════════════════════════════════════
 
-void UMachineLogicComponent::AssignWorkOrder(const FString& SKU, int32 Quantity)
+void UMachineLogicComponent::AssignWorkOrder(int64 WorkOrderId, const FString& SKU, int32 Quantity)
 {
 	if (!MachineContextComponent)
 	{
@@ -301,6 +301,7 @@ void UMachineLogicComponent::AssignWorkOrder(const FString& SKU, int32 Quantity)
 	
 	// Update machine context
 	auto& Context = MachineContextComponent->GetMutableContext();
+	Context.CurrentWorkOrderId = WorkOrderId;
 	Context.CurrentSKU = SKU;
 	Context.TargetQuantity = Quantity;
 	Context.bHasActiveWorkOrder = true;
@@ -311,10 +312,11 @@ void UMachineLogicComponent::AssignWorkOrder(const FString& SKU, int32 Quantity)
 	Context.ProductionAccumulator = 0.0f;
 	
 	UE_LOG(LogPraxisSim, Log, 
-		TEXT("[%s] Work order assigned: %s (Qty: %d)"), 
+		TEXT("[%s] Work order assigned: %s (Qty: %d, WO: %lld)"), 
 		*MachineId.ToString(),
 		*SKU,
-		Quantity);
+		Quantity,
+		WorkOrderId);
 	
 	// Record metric
 	if (Metrics && Orchestrator)

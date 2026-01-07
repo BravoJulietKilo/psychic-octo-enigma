@@ -5,6 +5,7 @@
 #include "Components/MachineLogicComponent.h"
 #include "PraxisRandomService.h"
 #include "PraxisMetricsSubsystem.h"
+#include "PraxisInventoryService.h"
 #include "StateTreeExecutionContext.h"
 #include "PraxisSimulationKernel.h"
 #include "GameFramework/Actor.h"
@@ -39,6 +40,9 @@ EStateTreeRunStatus FSTTask_Production::EnterState(
 					InstanceData.RandomService = GI->GetSubsystem<UPraxisRandomService>();
 					InstanceData.Metrics = GI->GetSubsystem<UPraxisMetricsSubsystem>();
 				}
+				
+				// Get inventory service (WorldSubsystem)
+				InstanceData.Inventory = World->GetSubsystem<UPraxisInventoryService>();
 			}
 		}
 	}
@@ -122,27 +126,58 @@ EStateTreeRunStatus FSTTask_Production::Tick(
 	{
 		MachineCtx.ProductionAccumulator -= 1.0f;
 		
+		// Get MachineId for reporting (resolve once per unit)
+		FName ReportMachineId = MachineCtx.MachineId;
+		if (ReportMachineId == NAME_None)
+		{
+			if (AActor* Owner = Cast<AActor>(Context.GetOwner()))
+			{
+				if (UMachineLogicComponent* LogicComp = Owner->FindComponentByClass<UMachineLogicComponent>())
+				{
+					ReportMachineId = LogicComp->MachineId;
+				}
+			}
+		}
+		
+		// Consume raw material from reservation (creates WIP)
+		if (InstanceData.Inventory)
+		{
+			// For now, assume input SKU is "Steel_Bar" - TODO: Get from BOM
+			FName InputSKU = TEXT("Steel_Bar");
+			
+			if (!InstanceData.Inventory->ConsumeReservedMaterial(
+				ReportMachineId,
+				MachineCtx.CurrentWorkOrderId,
+				InputSKU))
+			{
+				// No material available - skip this production cycle
+				UE_LOG(LogPraxisSim, Warning, 
+					TEXT("[%s] No reserved material available for production"),
+					*ReportMachineId.ToString());
+				continue;
+			}
+		}
+		
 		// Determine if this unit is scrap
 		if (ShouldScrapUnit(InstanceData, MachineCtx))
 		{
 			MachineCtx.ScrapCounter++;
 			
+			// Convert WIP to scrap in inventory
+			if (InstanceData.Inventory)
+			{
+				FName ScrapLocation = FName(*FString::Printf(TEXT("%s.Scrap"), *ReportMachineId.ToString()));
+				InstanceData.Inventory->ProduceScrap(
+					ReportMachineId,
+					MachineCtx.CurrentWorkOrderId,
+					FName(*MachineCtx.CurrentSKU),
+					ScrapLocation
+				);
+			}
+			
 			// Report scrap to metrics
 			if (InstanceData.Metrics)
 			{
-				// Get MachineId from owner's LogicComponent for accurate reporting
-				FName ReportMachineId = MachineCtx.MachineId;
-				if (ReportMachineId == NAME_None)
-				{
-					if (AActor* Owner = Cast<AActor>(Context.GetOwner()))
-					{
-						if (UMachineLogicComponent* LogicComp = Owner->FindComponentByClass<UMachineLogicComponent>())
-						{
-							ReportMachineId = LogicComp->MachineId;
-						}
-					}
-				}
-				
 				InstanceData.Metrics->RecordScrap(
 					ReportMachineId,
 					1,
@@ -153,7 +188,7 @@ EStateTreeRunStatus FSTTask_Production::Tick(
 			
 			UE_LOG(LogPraxisSim, Verbose, 
 				TEXT("[%s] Produced SCRAP unit (%d/%d good, %d scrap)"), 
-				*MachineCtx.MachineId.ToString(),
+				*ReportMachineId.ToString(),
 				MachineCtx.OutputCounter,
 				MachineCtx.TargetQuantity,
 				MachineCtx.ScrapCounter);
@@ -162,22 +197,21 @@ EStateTreeRunStatus FSTTask_Production::Tick(
 		{
 			MachineCtx.OutputCounter++;
 			
+			// Convert WIP to finished good in inventory
+			if (InstanceData.Inventory)
+			{
+				FName OutputLocation = FName(*FString::Printf(TEXT("%s.Output"), *ReportMachineId.ToString()));
+				InstanceData.Inventory->ProduceFinishedGood(
+					ReportMachineId,
+					MachineCtx.CurrentWorkOrderId,
+					FName(*MachineCtx.CurrentSKU),
+					OutputLocation
+				);
+			}
+			
 			// Report good production to metrics
 			if (InstanceData.Metrics)
 			{
-				// Get MachineId from owner's LogicComponent for accurate reporting
-				FName ReportMachineId = MachineCtx.MachineId;
-				if (ReportMachineId == NAME_None)
-				{
-					if (AActor* Owner = Cast<AActor>(Context.GetOwner()))
-					{
-						if (UMachineLogicComponent* LogicComp = Owner->FindComponentByClass<UMachineLogicComponent>())
-						{
-							ReportMachineId = LogicComp->MachineId;
-						}
-					}
-				}
-				
 				InstanceData.Metrics->RecordGoodProduction(
 					ReportMachineId,
 					1,
@@ -188,7 +222,7 @@ EStateTreeRunStatus FSTTask_Production::Tick(
 			
 			UE_LOG(LogPraxisSim, Verbose, 
 				TEXT("[%s] Produced GOOD unit (%d/%d good, %d scrap)"), 
-				*MachineCtx.MachineId.ToString(),
+				*ReportMachineId.ToString(),
 				MachineCtx.OutputCounter,
 				MachineCtx.TargetQuantity,
 				MachineCtx.ScrapCounter);

@@ -293,10 +293,12 @@ void UPraxisScheduleService::NotifyMachineOfAssignment(FName MachineId, const FP
 					{
 						struct
 						{
+							int64 WorkOrderId;
 							FString SKU;
 							int32 Quantity;
 						} Params;
 						
+						Params.WorkOrderId = WorkOrder.WorkOrderID;
 						Params.SKU = WorkOrder.SKU;
 						Params.Quantity = WorkOrder.Quantity;
 						

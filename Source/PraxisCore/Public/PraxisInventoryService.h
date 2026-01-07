@@ -8,7 +8,6 @@
 #include "MassEntityManager.h"
 #include "MassArchetypeTypes.h"
 #include "Types/EPraxisLocationType.h"
-#include "Fragments/MaterialFragments.h"
 #include "PraxisInventoryService.generated.h"
 
 // Forward declarations
@@ -258,6 +257,67 @@ public:
 		FName ToLocation);
 
 	// ═══════════════════════════════════════════════════════════════════════════
+	// Production Operations (for StateTree integration)
+	// ═══════════════════════════════════════════════════════════════════════════
+	
+	/**
+	 * Consume one unit of reserved raw material and create WIP
+	 * Called by STTask_Production at the start of each production cycle
+	 * @param MachineId Machine consuming the material
+	 * @param WorkOrderId Work order being processed
+	 * @param SKU Material SKU to consume
+	 * @return true if consumption successful
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Praxis|Inventory")
+	bool ConsumeReservedMaterial(
+		FName MachineId,
+		int64 WorkOrderId,
+		FName SKU);
+	
+	/**
+	 * Convert WIP to finished good
+	 * Called by STTask_Production when unit passes quality check
+	 * @param MachineId Machine that produced the item
+	 * @param WorkOrderId Work order being processed
+	 * @param OutputSKU Output product SKU
+	 * @param OutputLocationId Where to place the finished good
+	 * @return true if production recorded
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Praxis|Inventory")
+	bool ProduceFinishedGood(
+		FName MachineId,
+		int64 WorkOrderId,
+		FName OutputSKU,
+		FName OutputLocationId);
+	
+	/**
+	 * Convert WIP to scrap
+	 * Called by STTask_Production when unit fails quality check
+	 * @param MachineId Machine that produced the scrap
+	 * @param WorkOrderId Work order being processed
+	 * @param SKU Material SKU being scrapped
+	 * @param ScrapLocationId Where to place the scrap
+	 * @return true if scrap recorded
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Praxis|Inventory")
+	bool ProduceScrap(
+		FName MachineId,
+		int64 WorkOrderId,
+		FName SKU,
+		FName ScrapLocationId);
+	
+	/**
+	 * Release reservation without consuming (e.g., work order cancelled)
+	 * @param MachineId Machine that had the reservation
+	 * @param WorkOrderId Work order being cancelled
+	 * @return true if reservation released
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Praxis|Inventory")
+	bool ReleaseReservation(
+		FName MachineId,
+		int64 WorkOrderId);
+
+	// ═══════════════════════════════════════════════════════════════════════════
 	// Queries
 	// ═══════════════════════════════════════════════════════════════════════════
 	
@@ -332,14 +392,16 @@ private:
 	// Internal Helpers
 	// ═══════════════════════════════════════════════════════════════════════════
 	
-	/** Spawn a material entity with all fragments */
+	/** Spawn a material entity with all fragments
+	 * @param InitialState Material state (0=RawMaterial, 1=WIP, 2=FG, 3=Scrap, 4=InTransit)
+	 */
 	FMassEntityHandle SpawnMaterialEntity(
 		FName SKU,
 		int32 Quantity,
 		FName LocationId,
 		FName SubLocationId,
 		float VolumePerUnit,
-		EMaterialState InitialState = EMaterialState::RawMaterial);
+		uint8 InitialState = 0);
 	
 	/** Despawn material entities */
 	void DespawnMaterialEntities(const TArray<FMassEntityHandle>& Entities);
