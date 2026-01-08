@@ -924,34 +924,285 @@ UE_LOG(LogTemp, Log, TEXT("Material entities: %d"), EntityCount);
 
 ---
 
-## Next Steps (Phase 2)
+## Session: 2026-01-07 - System C (Inventory) Phase 2 Complete
 
-1. **Implement ReserveMaterial()**
-   - Query entities by SKU and Location
-   - Mark FMaterialReservationFragment as reserved
-   - Update aggregate cache (reserved quantity)
-
-2. **Implement TransferMaterial()**
-   - Find entities at source location
-   - Update FMaterialLocationFragment
-   - Update location capacities (source and destination)
-
-3. **Connect to STTask_Production**
-   - On production start: Consume 1 RM from input buffer
-   - Create WIP entity on machine
-   - On production complete: Convert WIP to FG or Scrap
-   - Move to output buffer
+### Overview
+Completed Phase 2 of the inventory system with reservations, transfers, production operations, and full StateTree integration.
 
 ---
 
-## Previous Session Reference
+### 1. ReserveMaterial Implementation
+**Time:** Early session
+**Request:** Implement material reservation for work orders
+**Actions:**
 
-### Session: 2024-12-28 - StateTree Context Integration
-*See above for full details of initial StateTree implementation*
+- Searches for unreserved entities matching SKU and location
+- Validates sufficient quantity available
+- Marks matching entities as reserved:
+  - `bReserved = true`
+  - `ReservedForWorkOrder = WorkOrderId`
+  - `ReservedForMachine = MachineId`
+  - `ReservationTime = timestamp`
+- Logs transaction and updates aggregates
 
-**Key Accomplishments:**
-- Created FPraxisMachineContext in PraxisCore
-- Implemented MachineContextComponent wrapper
-- Developed STTask_TestIncrement verification task
-- Established component auto-discovery pattern
-- Foundation for all current StateTree tasks
+**Result:** ✅ **SUCCESS**
+
+---
+
+### 2. TransferMaterial Implementation
+**Time:** Early session
+**Request:** Implement material transfer between locations
+**Actions:**
+
+**Full Transfer (entire entity):**
+- Updates `LocationId` on entity
+- Adjusts capacity at source (decrease) and destination (increase)
+
+**Partial Transfer (split entity):**
+- Reduces quantity on source entity
+- Spawns new entity at destination with transferred quantity
+- Links genealogy (new entity references parent batch)
+- Handles capacity updates correctly
+
+**Validation:**
+- Cannot transfer reserved material
+- Checks destination capacity before transfer
+- Validates source has sufficient unreserved quantity
+
+**Result:** ✅ **SUCCESS**
+
+---
+
+### 3. Production Operations for StateTree Integration
+**Time:** Mid session
+**Request:** Add methods for StateTree production task to consume/produce inventory
+**Actions:**
+
+**ConsumeReservedMaterial(MachineId, WorkOrderId, SKU):**
+- Finds reserved entity matching work order/machine/SKU
+- Decrements quantity by 1
+- Creates WIP entity at `MachineId.WIP` location
+- Links genealogy to parent batch
+- Marks WIP as reserved for the work order
+- Destroys source entity if depleted
+
+**ProduceFinishedGood(MachineId, WorkOrderId, OutputSKU, OutputLocationId):**
+- Finds WIP entity for work order/machine
+- Destroys WIP entity
+- Creates FG entity at output location
+- Sets `bPassedQuality = true`
+- Updates capacity at destination
+
+**ProduceScrap(MachineId, WorkOrderId, SKU, ScrapLocationId):**
+- Finds WIP entity for work order/machine
+- Destroys WIP entity
+- Creates Scrap entity at scrap location
+- Sets `bPassedQuality = false`
+- Updates capacity at destination
+
+**ReleaseReservation(MachineId, WorkOrderId):**
+- Finds all entities reserved for work order/machine
+- Clears reservation flags
+- Used when work order is cancelled
+
+**Result:** ✅ **SUCCESS**
+
+---
+
+### 4. Machine Context Update
+**Time:** Mid session
+**Request:** Add WorkOrderId tracking to machine context
+**Actions:**
+
+- Added `CurrentWorkOrderId` (int64) to `FPraxisMachineContext`
+- Updated `MachineLogicComponent::AssignWorkOrder()` signature to include WorkOrderId
+- Updated `PraxisScheduleService::NotifyMachineOfAssignment()` reflection call to pass WorkOrderId
+
+**Result:** ✅ **SUCCESS**
+
+---
+
+### 5. STTask_Production Integration
+**Time:** Mid session
+**Request:** Connect production task to inventory system
+**Actions:**
+
+**Instance Data:**
+- Added `UPraxisInventoryService* Inventory` to instance data
+
+**EnterState:**
+- Auto-discovers inventory service from World subsystems
+
+**Tick (per production cycle):**
+1. Resolves MachineId (with fallback to LogicComponent)
+2. Calls `ConsumeReservedMaterial()` to take 1 RM and create WIP
+3. If no reserved material available, skips cycle with warning
+4. Determines good/scrap via `ShouldScrapUnit()`
+5. Calls `ProduceFinishedGood()` or `ProduceScrap()` accordingly
+6. Reports to metrics subsystem
+
+**Graceful Fallback:**
+- If inventory service unavailable, production still works (just no inventory tracking)
+
+**Result:** ✅ **SUCCESS**
+
+---
+
+### 6. Circular Dependency Resolution
+**Time:** Late session
+**Problem:** PraxisMass <-> PraxisCore circular dependency
+
+**Cause:**
+- PraxisCore depends on PraxisMass (for Mass entity types)
+- Attempted to add PraxisCore dependency to PraxisMass (for EMaterialState enum)
+
+**Solution:**
+- Kept `EMaterialState` enum in `MaterialFragments.h` (PraxisMass)
+- Removed enum include from `PraxisInventoryService.h`
+- Changed `SpawnMaterialEntity()` signature to use `uint8` instead of `EMaterialState`
+- Cast to enum internally in .cpp file
+- Used numeric constants: 0=RawMaterial, 1=WIP, 2=FG, 3=Scrap
+
+**Result:** ✅ **RESOLVED**
+
+---
+
+### 7. Type Mismatch Fixes
+**Time:** Late session
+**Problem:** Metrics functions expected FString for SKU, but FName was passed
+
+**Solution:**
+- Changed `FName(*MachineCtx.CurrentSKU)` to `MachineCtx.CurrentSKU`
+- `CurrentSKU` is already FString, matches expected parameter type
+
+**Result:** ✅ **FIXED**
+
+---
+
+## Files Created/Modified This Session
+
+### Modified Files
+```
+PraxisCore/Public/PraxisInventoryService.h           [MODIFIED - added production ops]
+PraxisCore/Private/PraxisInventoryService.cpp        [MODIFIED - full implementation]
+PraxisCore/Public/FPraxisMachineContext.h            [MODIFIED - added CurrentWorkOrderId]
+PraxisCore/Private/PraxisScheduleService.cpp         [MODIFIED - pass WorkOrderId]
+PraxisSimulationKernel/Public/Components/MachineLogicComponent.h   [MODIFIED - AssignWorkOrder signature]
+PraxisSimulationKernel/Private/Components/MachineLogicComponent.cpp [MODIFIED - set WorkOrderId]
+PraxisSimulationKernel/Public/StateTrees/Tasks/STTask_Production.h  [MODIFIED - added Inventory]
+PraxisSimulationKernel/Private/StateTrees/Tasks/STTask_Production.cpp [MODIFIED - inventory integration]
+```
+
+### Deleted Files
+```
+PraxisCore/Public/Types/EMaterialState.h             [DELETED - caused duplicate enum]
+```
+
+---
+
+## Current State (Phase 2 Complete)
+
+### ✅ Phase 2 Complete
+1. **ReserveMaterial()** - Mark entities as reserved for work orders
+2. **TransferMaterial()** - Move material between locations (full or partial)
+3. **ConsumeReservedMaterial()** - Consume 1 RM → create WIP
+4. **ProduceFinishedGood()** - Convert WIP → FG
+5. **ProduceScrap()** - Convert WIP → Scrap
+6. **ReleaseReservation()** - Cancel reservations
+7. **STTask_Production Integration** - Full inventory consumption/production
+8. **WorkOrderId Tracking** - Context and assignment updated
+
+### 🏗️ Phase 3 (Next)
+- `TransformMaterial()` - BOM-based transformations (M:N ratios)
+- `ShipFinishedGoods()` - Remove FG from system
+- Complex BOM support
+- Niagara visualization
+
+---
+
+## Material Flow (Phase 2)
+
+```
+1. AddRawMaterial(SKU, Qty, Warehouse_RM)
+   → Creates RM entity at warehouse
+
+2. ReserveMaterial(SKU, Qty, Warehouse_RM, WorkOrderId, MachineId)
+   → Marks entities as reserved for work order
+
+3. [Production Cycle Start]
+   ConsumeReservedMaterial(MachineId, WorkOrderId, SKU)
+   → Decrements RM entity, creates WIP at Machine.WIP
+
+4a. [Quality Pass]
+    ProduceFinishedGood(MachineId, WorkOrderId, OutputSKU, OutputLocation)
+    → Destroys WIP, creates FG at output
+
+4b. [Quality Fail]
+    ProduceScrap(MachineId, WorkOrderId, SKU, ScrapLocation)
+    → Destroys WIP, creates Scrap
+
+5. [Work Order Cancel]
+   ReleaseReservation(MachineId, WorkOrderId)
+   → Unreserves all material for that work order
+```
+
+---
+
+## Key Technical Decisions
+
+### Circular Dependency Resolution
+**Problem:** EMaterialState needed in both PraxisCore and PraxisMass
+**Solution:** Keep enum in PraxisMass, use uint8 in header, cast internally
+**Rationale:** Avoids module dependency cycle, maintains type safety in implementation
+
+### WIP Location Convention
+**Pattern:** `{MachineId}.WIP` (e.g., "Machine_01.WIP")
+**Rationale:** Clear association between WIP and machine, easy to query
+
+### Graceful Degradation
+**Pattern:** If inventory service unavailable, production continues
+**Rationale:** Allows testing without full inventory setup, backward compatible
+
+---
+
+## Commit Summary
+
+```
+git commit -m "Phase 2 complete: Reservations, transfers, and StateTree integration
+
+- Implemented ReserveMaterial() for work order reservations
+- Implemented TransferMaterial() with full/partial transfer support
+- Added production operations: ConsumeReservedMaterial, ProduceFinishedGood, ProduceScrap
+- Added ReleaseReservation() for work order cancellation
+- Integrated STTask_Production with inventory consumption/production
+- Added CurrentWorkOrderId to FPraxisMachineContext
+- Updated AssignWorkOrder to include WorkOrderId
+- Resolved circular dependency (EMaterialState as uint8 in header)
+- Fixed metrics FName/FString type mismatch"
+```
+
+---
+
+## Next Steps (Phase 3)
+
+1. **TransformMaterial()** - BOM-based transformations
+   - Consume multiple input SKUs
+   - Produce output SKUs based on BOM ratios
+   - Support M:N transformations
+
+2. **ShipFinishedGoods()** - Remove FG from system
+   - Validate quantity available
+   - Update location capacity
+   - Log shipment transaction
+
+3. **Complex BOM Support**
+   - Multiple inputs (e.g., 2 Steel + 1 Plastic → 1 Widget)
+   - Multiple outputs (e.g., 1 Ore → 0.8 Metal + 0.2 Slag)
+   - Yield calculations
+
+4. **Niagara Visualization**
+   - Particle streams for material flow
+   - Color-coded by state (RM=blue, WIP=yellow, FG=green, Scrap=red)
+   - Location-based rendering
+
+---

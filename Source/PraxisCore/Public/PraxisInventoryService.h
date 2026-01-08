@@ -186,6 +186,35 @@ struct PRAXISCORE_API FInventorySummary
 };
 
 /**
+ * Inventory at a specific location (for visualization)
+ */
+USTRUCT(BlueprintType)
+struct PRAXISCORE_API FLocationInventoryItem
+{
+	GENERATED_BODY()
+
+	/** SKU */
+	UPROPERTY(BlueprintReadOnly)
+	FName SKU;
+	
+	/** Quantity at this location */
+	UPROPERTY(BlueprintReadOnly)
+	int32 Quantity = 0;
+	
+	/** Material state (0=RM, 1=WIP, 2=FG, 3=Scrap, 4=InTransit) */
+	UPROPERTY(BlueprintReadOnly)
+	uint8 MaterialState = 0;
+	
+	/** Volume occupied */
+	UPROPERTY(BlueprintReadOnly)
+	float Volume = 0.0f;
+	
+	/** Is this material reserved? */
+	UPROPERTY(BlueprintReadOnly)
+	bool bReserved = false;
+};
+
+/**
  * UPraxisInventoryService
  * 
  * Manages material inventory using Mass entities with:
@@ -340,6 +369,10 @@ public:
 	/** Get transaction history */
 	UFUNCTION(BlueprintCallable, Category = "Praxis|Inventory")
 	TArray<FInventoryTransaction> GetTransactionHistory(int32 MaxRecords = 100) const;
+	
+	/** Get all inventory items at a specific location (for visualization) */
+	UFUNCTION(BlueprintCallable, Category = "Praxis|Inventory")
+	TArray<FLocationInventoryItem> GetInventoryAtLocation(FName LocationId) const;
 	
 	/** Get total entity count (for debugging) */
 	UFUNCTION(BlueprintCallable, Category = "Praxis|Inventory")

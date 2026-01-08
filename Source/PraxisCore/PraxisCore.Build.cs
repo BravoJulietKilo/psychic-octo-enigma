@@ -12,7 +12,8 @@ public class PraxisCore : ModuleRules
                 "Core",
                 "MassEntity",
                 "MassCommon",
-                "StructUtils"
+                "StructUtils",
+                "Niagara"
             }
         );
 
