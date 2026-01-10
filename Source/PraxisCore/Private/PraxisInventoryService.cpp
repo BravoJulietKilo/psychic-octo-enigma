@@ -3,6 +3,7 @@
 #include "PraxisInventoryService.h"
 #include "PraxisCore.h"
 #include "PraxisMassSubsystem.h"
+#include "PraxisLocationRegistry.h"
 #include "Fragments/MaterialFragments.h"
 
 // ════════════════════════════════════════════════════════════════════════════════
@@ -17,6 +18,7 @@ void UPraxisInventoryService::Initialize(FSubsystemCollectionBase& Collection)
 	if (UWorld* World = GetWorld())
 	{
 		MassSubsystem = World->GetSubsystem<UPraxisMassSubsystem>();
+		LocationRegistry = World->GetSubsystem<UPraxisLocationRegistry>();
 		
 		if (MassSubsystem && MassSubsystem->IsInitialized())
 		{
@@ -28,6 +30,11 @@ void UPraxisInventoryService::Initialize(FSubsystemCollectionBase& Collection)
 		{
 			UE_LOG(LogPraxisSim, Warning, TEXT("Inventory service: PraxisMassSubsystem not found or not initialized."));
 			UE_LOG(LogPraxisSim, Warning, TEXT("  World Type: %d"), (int32)World->WorldType);
+		}
+		
+		if (!LocationRegistry)
+		{
+			UE_LOG(LogPraxisSim, Warning, TEXT("Inventory service: LocationRegistry not found - flow animations will be disabled"));
 		}
 	}
 	else
@@ -179,6 +186,19 @@ bool UPraxisInventoryService::AddRawMaterial(
 			Quantity, *SKU.ToString(), *LocationId.ToString(), 
 			SubLocationId.IsNone() ? TEXT("") : *SubLocationId.ToString(),
 			Entity.Index);
+		
+		// Broadcast flow event for visualization (material appearing)
+		FPraxisMaterialFlowEvent FlowEvent;
+		FlowEvent.EventType = EPraxisFlowEventType::Receive;
+		FlowEvent.SKU = SKU;
+		FlowEvent.Quantity = Quantity;
+		FlowEvent.DestinationLocationId = LocationId;
+		FlowEvent.DestinationPosition = GetLocationWorldPosition(LocationId);
+		FlowEvent.SourcePosition = FlowEvent.DestinationPosition - FVector(0, 0, 100); // Rise up from below
+		FlowEvent.MaterialState = 0; // Raw Material
+		FlowEvent.Timestamp = GetWorld()->GetTimeSeconds();
+		FlowEvent.Duration = 0.5f;
+		BroadcastFlowEvent(FlowEvent);
 		
 		OnInventoryChanged.Broadcast(SKU, LocationId, Quantity);
 		return true;
@@ -442,6 +462,13 @@ bool UPraxisInventoryService::ConsumeReservedMaterial(
 	
 	UpdateAggregates();
 	
+	// Broadcast flow event for visualization
+	FVector SourcePos = GetLocationWorldPosition(SourceLocation);
+	FPraxisMaterialFlowEvent FlowEvent = FPraxisMaterialFlowEvent::CreateConsume(
+		SKU, 1, SourceLocation, SourcePos, MachineId, WorkOrderId);
+	FlowEvent.DestinationPosition = SourcePos + FVector(0, 0, 50); // Rise up animation
+	BroadcastFlowEvent(FlowEvent);
+	
 	UE_LOG(LogPraxisSim, Verbose, 
 		TEXT("Consumed 1 %s for WO:%lld (Machine: %s) -> WIP"),
 		*SKU.ToString(), WorkOrderId, *MachineId.ToString());
@@ -559,6 +586,13 @@ bool UPraxisInventoryService::ProduceFinishedGood(
 		TEXT("Produced 1 %s for WO:%lld (Machine: %s) -> %s"),
 		*OutputSKU.ToString(), WorkOrderId, *MachineId.ToString(), *OutputLocationId.ToString());
 	
+	// Broadcast flow event for visualization
+	FVector DestPos = GetLocationWorldPosition(OutputLocationId);
+	FPraxisMaterialFlowEvent FlowEvent = FPraxisMaterialFlowEvent::CreateProduce(
+		OutputSKU, 1, OutputLocationId, DestPos, MachineId, WorkOrderId, 2); // 2 = FinishedGoods
+	FlowEvent.SourcePosition = DestPos - FVector(0, 0, 50); // Pop up from below
+	BroadcastFlowEvent(FlowEvent);
+	
 	OnInventoryChanged.Broadcast(OutputSKU, OutputLocationId, 1);
 	return true;
 }
@@ -672,6 +706,13 @@ bool UPraxisInventoryService::ProduceScrap(
 	UE_LOG(LogPraxisSim, Verbose, 
 		TEXT("Scrapped 1 %s for WO:%lld (Machine: %s) -> %s"),
 		*SKU.ToString(), WorkOrderId, *MachineId.ToString(), *ScrapLocationId.ToString());
+	
+	// Broadcast flow event for visualization
+	FVector DestPos = GetLocationWorldPosition(ScrapLocationId);
+	FPraxisMaterialFlowEvent FlowEvent = FPraxisMaterialFlowEvent::CreateProduce(
+		SKU, 1, ScrapLocationId, DestPos, MachineId, WorkOrderId, 3); // 3 = Scrap
+	FlowEvent.SourcePosition = DestPos - FVector(0, 0, 50); // Pop up from below
+	BroadcastFlowEvent(FlowEvent);
 	
 	return true;
 }
@@ -1113,6 +1154,19 @@ bool UPraxisInventoryService::ShipFinishedGoods(
 		TEXT("Shipped %d units of %s from %s (Batches: %d)"),
 		TotalShipped, *SKU.ToString(), *LocationId.ToString(), ShippedBatchIds.Num());
 	
+	// Broadcast flow event for visualization (material disappearing)
+	FPraxisMaterialFlowEvent FlowEvent;
+	FlowEvent.EventType = EPraxisFlowEventType::Ship;
+	FlowEvent.SKU = SKU;
+	FlowEvent.Quantity = TotalShipped;
+	FlowEvent.SourceLocationId = LocationId;
+	FlowEvent.SourcePosition = GetLocationWorldPosition(LocationId);
+	FlowEvent.DestinationPosition = FlowEvent.SourcePosition + FVector(0, 0, 100); // Rise up and disappear
+	FlowEvent.MaterialState = 2; // Finished Goods
+	FlowEvent.Timestamp = GetWorld()->GetTimeSeconds();
+	FlowEvent.Duration = 0.5f;
+	BroadcastFlowEvent(FlowEvent);
+	
 	OnInventoryChanged.Broadcast(SKU, LocationId, -TotalShipped);
 	return true;
 }
@@ -1292,6 +1346,23 @@ bool UPraxisInventoryService::TransferMaterial(
 	UE_LOG(LogPraxisSim, Log, 
 		TEXT("Transferred %d units of %s from %s to %s"),
 		TotalTransferred, *SKU.ToString(), *FromLocation.ToString(), *ToLocation.ToString());
+	
+	// Broadcast flow event for visualization
+	FVector SourcePos = GetLocationWorldPosition(FromLocation);
+	FVector DestPos = GetLocationWorldPosition(ToLocation);
+	// Determine material state from the first entity transferred
+	int32 MatState = 0; // Default to RM
+	if (EntitiesToTransfer.Num() > 0)
+	{
+		const FMaterialStateFragment* StateFrag = EntityManager.GetFragmentDataPtr<FMaterialStateFragment>(EntitiesToTransfer[0].Key);
+		if (StateFrag)
+		{
+			MatState = static_cast<int32>(StateFrag->State);
+		}
+	}
+	FPraxisMaterialFlowEvent FlowEvent = FPraxisMaterialFlowEvent::CreateTransfer(
+		SKU, TotalTransferred, FromLocation, ToLocation, SourcePos, DestPos, MatState);
+	BroadcastFlowEvent(FlowEvent);
 	
 	OnInventoryChanged.Broadcast(SKU, FromLocation, -TotalTransferred);
 	OnInventoryChanged.Broadcast(SKU, ToLocation, TotalTransferred);
@@ -1741,4 +1812,18 @@ void UPraxisInventoryService::DebugPrintInventory(FName SKU) const
 	
 	UE_LOG(LogPraxisSim, Log, TEXT("  Total Entities: %d"), MaterialEntities.Num());
 	UE_LOG(LogPraxisSim, Log, TEXT("═══════════════════════════════════════════════════════════"));
+}
+
+void UPraxisInventoryService::BroadcastFlowEvent(const FPraxisMaterialFlowEvent& Event)
+{
+	OnMaterialFlowEvent.Broadcast(Event);
+}
+
+FVector UPraxisInventoryService::GetLocationWorldPosition(FName LocationId) const
+{
+	if (LocationRegistry)
+	{
+		return LocationRegistry->GetLocationPosition(LocationId);
+	}
+	return FVector::ZeroVector;
 }

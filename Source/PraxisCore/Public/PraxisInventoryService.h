@@ -8,10 +8,12 @@
 #include "MassEntityManager.h"
 #include "MassArchetypeTypes.h"
 #include "Types/EPraxisLocationType.h"
+#include "Types/FPraxisMaterialFlowEvent.h"
 #include "PraxisInventoryService.generated.h"
 
 // Forward declarations
 class UPraxisMassSubsystem;
+class UPraxisLocationRegistry;
 
 /**
  * Location Capacity Definition
@@ -411,6 +413,9 @@ public:
 	DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnLocationCapacityWarning, FName, LocationId, float, UsedPercentage);
 	DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnLowStock, FName, SKU, int32, RemainingQuantity);
 	
+	// Flow event delegate for visualization (non-dynamic for struct support)
+	DECLARE_MULTICAST_DELEGATE_OneParam(FOnMaterialFlowEvent, const FPraxisMaterialFlowEvent&);
+	
 	UPROPERTY(BlueprintAssignable, Category = "Praxis|Inventory")
 	FOnInventoryChanged OnInventoryChanged;
 	
@@ -419,6 +424,9 @@ public:
 	
 	UPROPERTY(BlueprintAssignable, Category = "Praxis|Inventory")
 	FOnLowStock OnLowStock;
+	
+	/** Flow event for visualization animations (transfers, production, consumption) */
+	FOnMaterialFlowEvent OnMaterialFlowEvent;
 
 private:
 	// ═══════════════════════════════════════════════════════════════════════════
@@ -450,6 +458,12 @@ private:
 	
 	/** Build the entity template for material batches */
 	void BuildMaterialEntityTemplate();
+	
+	/** Broadcast a flow event to visualizers */
+	void BroadcastFlowEvent(const FPraxisMaterialFlowEvent& Event);
+	
+	/** Get world position for a location (queries LocationRegistry) */
+	FVector GetLocationWorldPosition(FName LocationId) const;
 
 	// ═══════════════════════════════════════════════════════════════════════════
 	// Data
@@ -458,6 +472,10 @@ private:
 	/** Praxis Mass subsystem reference */
 	UPROPERTY()
 	TObjectPtr<UPraxisMassSubsystem> MassSubsystem = nullptr;
+	
+	/** Location registry for world positions (for flow animations) */
+	UPROPERTY()
+	TObjectPtr<UPraxisLocationRegistry> LocationRegistry = nullptr;
 	
 	/** Archetype handle for material entities */
 	FMassArchetypeHandle MaterialArchetype;
